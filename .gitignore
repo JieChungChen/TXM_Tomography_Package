@@ -1,6 +1,6 @@
 __pycache__/
 data_train/
-AI align/
+AI_align/
 
 *.tif
 *.pt
