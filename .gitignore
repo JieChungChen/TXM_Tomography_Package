@@ -1,1 +1,6 @@
 __pycache__/
+data_train/
+
+*.tif
+*.pt
+*.mp4
