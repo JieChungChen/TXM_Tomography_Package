@@ -1,0 +1,6 @@
+data_train/
+data_test/
+fig_temp/
+
+*.pt
+*.pth

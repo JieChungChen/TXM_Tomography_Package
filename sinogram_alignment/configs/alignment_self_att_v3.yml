@@ -1,0 +1,22 @@
+name: Self-attention model for sinogram alignment
+
+data_settings:
+  max_shift: 50
+  
+training_settings:
+  trn_data_dir: data_train/real_sino
+  model_save_dir: checkpoints
+  ckpt_path: alignment_ep100.pt
+  device: cuda:0
+  n_epochs: 1000
+  save_n_epochs: 100
+  batch_size: 32
+  base_lr: 2.e-4
+  weight_decay: 1.e-4
+  grad_clip: 1
+
+model_settings:
+  ch: 512
+  num_att_blocks: 4
+  num_align_blocks: 1
+  dropout: 0.1
