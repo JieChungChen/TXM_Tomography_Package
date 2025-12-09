@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 from tqdm import tqdm
-from recon_algorithms import radon_transform_astra, recon_slice_from_sino
+from recon_algorithms import radon_transform_astra, recon_fbp_astra
 
 
 def icon_augmentation(icon):
@@ -69,7 +69,7 @@ def main():
             sino = add_projection_contrast(sino, intensity_range=(0.7, 1.3))
             base_name = os.path.basename(f).replace('.png', '_sino.png')
             cv2.imwrite(os.path.join(save_folder, base_name), sino)
-            recon = recon_slice_from_sino(sino)
+            recon = recon_fbp_astra(sino)
             plt.imshow(recon, cmap='gray')
             plt.title('Reconstructed Image')
             plt.show()

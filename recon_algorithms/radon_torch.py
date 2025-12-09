@@ -6,18 +6,24 @@ import torch.nn.functional as F
 def radon_transform_torch(image, theta, circle=False, fill_outside=True, sub_sample=1):
     """
     radon transform pytorch version based on skimage radon
+    
     Parameters
     ----------
     image : ndarray
-        Input image. The width and height of the image should be the same
+        Input image (img_size, img_size)
     theta : ndarray
         Projection angles (in radians).
     circle : boolean, optional
         The value will be zero outside the inscribed circle
     fill_outside: boolean, optional
-        if True, the area outside the inscribed circle will be filled by the median 
+        If True, the area outside the inscribed circle will be filled by the median 
     sub_sample : float, optional
-        a ratio between[0, 1] to determine the subsample size, the radon transform will only consider the subsmapled image.
+        A ratio between [0, 1] to determine the subsample size, the radon transform will only consider the subsampled image.
+
+    Returns
+    -------
+    radon_image : ndarray
+        Sinogram of the input image (len(theta), img_size).
     """
     if image.ndim != 2:
         raise ValueError('The input image must be 2-D')
