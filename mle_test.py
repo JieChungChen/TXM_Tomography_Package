@@ -5,7 +5,7 @@ import argparse
 import cv2
 import numpy as np
 from tqdm import tqdm
-from recon_algorithms import mlem_reconstruction_gpu, recon_fbp_astra
+from recon_algorithms import mlem_recon, recon_fbp_astra
 from utils import min_max_normalize, from_xml
 
 
@@ -39,14 +39,15 @@ def create_circular_mask(image_size, crop_factor):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="ML-EM Reconstruction")
-    parser.add_argument('--input_dir', type=str, default='D:/Datasets/TXM_Tomo/tiff_tomo-1-pristine-b2-60s-171p')
+    parser.add_argument('--input_dir', type=str, default='D:/Datasets/TXM_Tomo/tomo4-E-b2-60s-181p')
     parser.add_argument('--output_dir', type=str, default='D:/Datasets/MLE_AI')
+    parser.add_argument('--save_fbp', type=bool, default=False, help='Whether to save FBP reconstruction results.')
     parser.add_argument('--image_size', type=int, default=512)
     parser.add_argument('--ang_inter', type=float, default=1.0, help='Angle interval in degrees.')
     parser.add_argument('--crop_factor', type=float, default=0.95, help='Crop factor for circular mask (0-1).')
-    parser.add_argument('--iter_count', type=int, default=50, help='Number of ML-EM iterations.')
-    parser.add_argument('--start_layer', type=int, default=150)
-    parser.add_argument('--end_layer', type=int, default=420)
+    parser.add_argument('--iter_count', type=int, default=100, help='Number of ML-EM iterations.')
+    parser.add_argument('--start_layer', type=int, default=210)
+    parser.add_argument('--end_layer', type=int, default=455)
     return parser.parse_args()
 
 
@@ -92,30 +93,27 @@ def main(args):
     start_time = time.time()
     
     # 對指定範圍的每一層進行重建
-    for layer in range(start_layer, end_layer, 3):
-        print(f"\n處理第 {layer}/{end_layer} 層")
-        
+    pbar = tqdm(range(start_layer, end_layer, 3))
+    for layer in pbar:
         # 提取當前層的sinogram
         sinogram = tomo[:, layer, :]
-        print(f"sinogram shape: {sinogram.shape}")
         sinogram = min_max_normalize(sinogram, to_8bit=True)
         sinogram = (255 - sinogram).astype(np.float64)
+        pbar.set_description(f"Processing layer {layer}/{end_layer}, sino shape {sinogram.shape}")
         
         # 執行ML-EM重建
-        reconstruction = mlem_reconstruction_gpu(sinogram, args.ang_inter, args.iter_count, mask)
-        reconstruction_raw = recon_fbp_astra(sinogram, angle_interval=args.ang_inter, norm=True)
-        
-        # 儲存重建結果
+        reconstruction = mlem_recon(sinogram, args.ang_inter, args.iter_count, mask)
         tif_path = os.path.join(args.output_dir, f'mle/{sample_name}_{str(layer).zfill(4)}.tif')
         img_out = min_max_normalize(reconstruction, to_8bit=True)
         cv2.imwrite(tif_path, img_out)
-
-        tif_raw_path = os.path.join(args.output_dir, f'fbp/{sample_name}_{str(layer).zfill(4)}.tif')
-        img_out_raw = min_max_normalize(reconstruction_raw, to_8bit=True)
-        cv2.imwrite(tif_raw_path, img_out_raw)
         
-        print(f"第 {layer} 層完成")
-    
+        # 使用FBP重建作為比較
+        if args.save_fbp:
+            reconstruction_raw = recon_fbp_astra(sinogram, angle_interval=args.ang_inter, norm=True)
+            tif_raw_path = os.path.join(args.output_dir, f'fbp/{sample_name}_{str(layer).zfill(4)}.tif')
+            img_out_raw = min_max_normalize(reconstruction_raw, to_8bit=True)
+            cv2.imwrite(tif_raw_path, img_out_raw)
+            
     # ==================== 完成 ====================
     elapsed_time = time.time() - start_time
     print(f"\n重建完成!總耗時: {elapsed_time:.2f} 秒")
