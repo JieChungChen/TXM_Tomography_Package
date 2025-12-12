@@ -44,10 +44,10 @@ def parse_args():
     parser.add_argument('--save_fbp', type=bool, default=False, help='Whether to save FBP reconstruction results.')
     parser.add_argument('--image_size', type=int, default=512)
     parser.add_argument('--ang_inter', type=float, default=1.0, help='Angle interval in degrees.')
-    parser.add_argument('--crop_factor', type=float, default=0.95, help='Crop factor for circular mask (0-1).')
+    parser.add_argument('--mask_ratio', type=float, default=0.95, help='Crop factor for circular mask (0-1).')
     parser.add_argument('--iter_count', type=int, default=100, help='Number of ML-EM iterations.')
     parser.add_argument('--start_layer', type=int, default=210)
-    parser.add_argument('--end_layer', type=int, default=455)
+    parser.add_argument('--end_layer', type=int, default=240)
     return parser.parse_args()
 
 
@@ -84,10 +84,7 @@ def main(args):
 
     if height != size or width != size:
         tomo = np.array([cv2.resize(img, (size, size), interpolation=cv2.INTER_LINEAR) for img in tomo])
-    
-    # 創建圓形遮罩
-    mask = create_circular_mask(size, args.crop_factor)
-    
+        
     # # ==================== ML-EM重建 ====================
     print("\n開始ML-EM重建...")
     start_time = time.time()
@@ -102,7 +99,7 @@ def main(args):
         pbar.set_description(f"Processing layer {layer}/{end_layer}, sino shape {sinogram.shape}")
         
         # 執行ML-EM重建
-        reconstruction = mlem_recon(sinogram, args.ang_inter, args.iter_count, mask)
+        reconstruction = mlem_recon(sinogram, args.ang_inter, args.iter_count, args.mask_ratio)
         tif_path = os.path.join(args.output_dir, f'mle/{sample_name}_{str(layer).zfill(4)}.tif')
         img_out = min_max_normalize(reconstruction, to_8bit=True)
         cv2.imwrite(tif_path, img_out)

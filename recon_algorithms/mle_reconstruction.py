@@ -3,6 +3,31 @@ import torch.nn.functional as F
 import numpy as np
 
 
+def create_circular_mask(image_size, mask_ratio, device):
+    """
+    create circular mask for reconstruction, avoiding artifacts at the edges.
+    
+    Parameters
+    ----------
+        image_size : int
+        crop_factor : float
+            ratio of image to keep (0-1)
+    
+    Returns
+    -------
+        mask: torch.Tensor
+            (image_size, image_size)
+    """
+    center = image_size // 2
+    radius = image_size // 2 * mask_ratio
+    
+    y, x = torch.meshgrid(torch.arange(image_size, device=device), torch.arange(image_size, device=device), indexing='ij')
+    dist = torch.sqrt((x - center)**2 + (y - center)**2)
+    mask = (dist < radius).float()
+    
+    return mask
+
+
 def rotate_torch_batch(image, angles):
     """
     Parameters
@@ -114,7 +139,7 @@ def mlem_torch_core(sinogram: torch.Tensor, ang_inter: float, iter_count: int, m
     return reconstruction
 
 
-def mlem_recon(sinogram: np.ndarray, ang_inter: float, iter_count: int, mask: np.ndarray):
+def mlem_recon(sinogram: np.ndarray, ang_inter: float, iter_count: int, mask_ratio: float):
     """
     maximum likelihood expectation maximization (MLEM) interface function
     
@@ -134,8 +159,10 @@ def mlem_recon(sinogram: np.ndarray, ang_inter: float, iter_count: int, mask: np
     reconstruction : ndarray
         (image_size, image_size)
     """
-    sinogram_torch = torch.tensor(sinogram).float()
-    mask_torch = torch.tensor(mask).float()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    sinogram_torch = torch.tensor(sinogram, device=device).float()
+    mask_torch = create_circular_mask(sinogram.shape[1], mask_ratio, device)
     
     reconstruction_torch = mlem_torch_core(sinogram_torch, ang_inter, iter_count, mask_torch)
     reconstruction = reconstruction_torch.cpu().numpy()

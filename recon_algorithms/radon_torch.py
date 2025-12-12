@@ -56,8 +56,8 @@ def radon_transform_torch(image, theta, circle=False, fill_outside=True, sub_sam
         cos_a, sin_a = torch.cos(angle), torch.sin(angle)
         rot_mat = torch.Tensor([[cos_a, sin_a, 0],
                                 [-sin_a, cos_a, 0]]).type(dtype)
-        grid = F.affine_grid(rot_mat[None, ...], image.size())
-        rotated = F.grid_sample(image, grid).squeeze()
+        grid = F.affine_grid(rot_mat[None, ...], image.size(), align_corners=False)
+        rotated = F.grid_sample(image, grid, align_corners=False).squeeze()
         if sub_sample<1:
             start_p, end_p = int(size//2-out_size//2), int(size//2+out_size//2)
             rotated = rotated[start_p:end_p, start_p:end_p]
