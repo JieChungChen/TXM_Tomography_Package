@@ -1,0 +1,27 @@
+name: Transformer Generator for Sinogram Alignment
+
+data_settings:
+  max_shift: 50
+  
+training_settings:
+  trn_data_dir: D:/Datasets/Icon_Sino
+  model_save_dir: sino_align_gen/checkpoints
+  ckpt_path: ~
+  device: cuda:0
+  n_epochs: 1
+  visualize_n_epochs': 10
+  save_n_epochs: 50
+  batch_size: 32
+  base_lr: 1.e-4
+  weight_decay: 1.e-4
+  grad_clip: 1
+
+model_settings:
+  img_size: 512
+  embed_dim: 768
+  depth: 12
+  num_heads: 12
+  decoder_embed_dim: 512
+  decoder_depth: 8
+  decoder_num_heads: 16
+  mlp_ratio: 4
