@@ -1,6 +1,7 @@
 __pycache__/
 data_train/
 AI_align/
+temp/
 
 *.tif
 *.pt
