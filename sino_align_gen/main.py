@@ -30,7 +30,7 @@ def main(args):
 
     model = sinogram_mae_build(configs['model_settings']).to(device)
     if trn_conf['ckpt_path'] is not None:
-        model.load_state_dict(torch.load(trn_conf['model_save_dir']+'/'+trn_conf['ckpt_path'], map_location=device), strict=True)
+        model.load_state_dict(torch.load(trn_conf['model_save_dir']+'/'+trn_conf['ckpt_path'], map_location=device), strict=False)
     dataset = Sinogram_Data_Random_Shift(trn_conf['trn_data_dir'], data_conf['max_shift'])
     dataloader = DataLoader(dataset, batch_size=trn_conf['batch_size'], num_workers=0, shuffle=True, pin_memory=True, drop_last=True)
     criterion = nn.MSELoss() # L1 seems to be better than MSE
@@ -74,12 +74,14 @@ def main(args):
                     })
 
         if (epoch+1) % trn_conf['visualize_n_epochs'] == 0:
-            fig, ax = plt.subplots(2, 1, figsize=(8, 8))
-            ax[0].imshow(pred_sino[5].cpu().detach().numpy(), cmap='gray', vmin=0, vmax=1)
-            ax[0].set_title('Predicted')
-            ax[1].imshow(sino_gt[5].cpu().detach().numpy(), cmap='gray', vmin=0, vmax=1)
-            ax[1].set_title('Ground Truth')
-            plt.savefig('sino_align_gen/temp/sino_epoch_'+str(epoch+1)+'.jpeg')
+            fig, ax = plt.subplots(3, 1, figsize=(8, 9))
+            ax[0].imshow(shifted_sino[5].cpu().detach().numpy(), cmap='gray', vmin=0, vmax=1)
+            ax[0].set_title('Input Shifted')
+            ax[1].imshow(pred_sino[5].cpu().detach().numpy(), cmap='gray', vmin=0, vmax=1)
+            ax[1].set_title('Predicted')
+            ax[2].imshow(sino_gt[5].cpu().detach().numpy(), cmap='gray', vmin=0, vmax=1)
+            ax[2].set_title('Ground Truth')
+            plt.savefig('sino_align_gen/temp/sino_epoch_'+str(epoch+1)+'.jpeg', dpi=300)
             plt.close()
 
         if (epoch+1)%trn_conf['save_n_epochs'] == 0:

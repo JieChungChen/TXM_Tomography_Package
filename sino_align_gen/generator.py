@@ -28,6 +28,11 @@ class SinogramMAE(nn.Module):
 
         # Head
         self.decoder_pred = nn.Linear(decoder_embed_dim, img_size)  
+        self.refine_head = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(16, 1, kernel_size=3, padding=1)
+        )
 
         self.initialize_weights()
 
@@ -54,7 +59,10 @@ class SinogramMAE(nn.Module):
         x = self.decoder_embed(x)
         x = torch.cat([x, self.mask_token.repeat(B, 181 - seq_len, 1)], dim=1)
         x = self.decoder(x)
-        x = self.decoder_pred(x)
+        x = self.decoder_pred(x)          # (B, 181, 512)
+        x = x.unsqueeze(1)                # (B, 1, 181, 512)
+        x = self.refine_head(x)           # conv refine
+        x = x.squeeze(1)                  # (B, 181, 512)
         return x
 
 # ---------------- Relative Pos Encoding in Attention ----------------

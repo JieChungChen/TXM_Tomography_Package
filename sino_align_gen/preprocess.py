@@ -92,7 +92,6 @@ class Sinogram_Data_Random_Shift(Dataset):
         x = np.arange(num_proj)
         if shift_mode == 'mixed':
             shift = (
-                np.random.normal(0, max_shift*0.5) +
                 np.random.uniform(0, max_shift*0.5) * np.sin(2 * np.pi * np.random.uniform(0.05, 0.3) * x) +
                 np.random.uniform(-max_shift*0.5, max_shift*0.5, size=num_proj)
             )
