@@ -6,10 +6,10 @@ data_settings:
 training_settings:
   trn_data_dir: D:/Datasets/Icon_Sino
   model_save_dir: sino_align_gen/checkpoints
-  ckpt_path: ~
+  ckpt_path: alignment_ep100.pt
   device: cuda:0
-  n_epochs: 1
-  visualize_n_epochs': 10
+  n_epochs: 100
+  visualize_n_epochs: 5
   save_n_epochs: 50
   batch_size: 32
   base_lr: 1.e-4

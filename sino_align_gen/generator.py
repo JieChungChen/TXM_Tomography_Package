@@ -11,31 +11,29 @@ class SinogramMAE(nn.Module):
         super().__init__()
         self.num_projections = 181
         self.img_size = img_size
-        # 每個 projection (512) -> token 向量
         self.proj_embed = nn.Linear(img_size, embed_dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_projections, embed_dim))
 
         # Encoder
         self.encoder = TransformerEncoder(depth=depth, embed_dim=embed_dim,
-                                          num_heads=num_heads, mlp_ratio=mlp_ratio)
+                                          num_heads=num_heads, mlp_ratio=mlp_ratio,
+                                          seq_len=self.num_projections)
 
         # Decoder
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim)
-        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_projections, decoder_embed_dim))
         self.decoder = TransformerDecoder(depth=decoder_depth, embed_dim=decoder_embed_dim,
-                                          num_heads=decoder_num_heads, mlp_ratio=mlp_ratio)
+                                          num_heads=decoder_num_heads, mlp_ratio=mlp_ratio,
+                                          seq_len=self.num_projections)
 
         # Head
-        self.decoder_pred = nn.Linear(decoder_embed_dim, img_size)  # 預測完整 projection
+        self.decoder_pred = nn.Linear(decoder_embed_dim, img_size)  
 
         self.initialize_weights()
 
     def initialize_weights(self):
-        nn.init.trunc_normal_(self.pos_embed, std=.02)
-        nn.init.trunc_normal_(self.decoder_pos_embed, std=.02)
         nn.init.trunc_normal_(self.cls_token, std=.02)
+        nn.init.trunc_normal_(self.mask_token, std=.02)
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -49,51 +47,64 @@ class SinogramMAE(nn.Module):
 
     def forward(self, x, max_mask_len=30):
         # x: (B, 181, 512)
-        mask_len = random.randint(0, max_mask_len)
+        seq_len = 181 - random.randint(0, max_mask_len)
         B = x.shape[0]
-        x = self.proj_embed(x) + self.pos_embed   # 投影嵌入 + 位置
-        x = self.encoder(x[:, :-mask_len, :])  # 編碼未遮罩的投影
+        x = self.proj_embed(x)
+        x = self.encoder(x[:, :seq_len, :])
         x = self.decoder_embed(x)
-        x = torch.cat([x, self.mask_token.repeat(B, mask_len, 1)], dim=1)  # 添加遮罩 token
-        x = x + self.decoder_pos_embed
+        x = torch.cat([x, self.mask_token.repeat(B, 181 - seq_len, 1)], dim=1)
         x = self.decoder(x)
-        x = self.decoder_pred(x)  # (B, 181, 512)
+        x = self.decoder_pred(x)
         return x
 
+# ---------------- Relative Pos Encoding in Attention ----------------
 
-# Transformer blocks (簡化版本)
-class TransformerEncoder(nn.Module):
-    def __init__(self, depth, embed_dim, num_heads, mlp_ratio):
+class RelPosMultiheadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, seq_len):
         super().__init__()
-        self.layers = nn.ModuleList([
-            TransformerBlock(embed_dim, num_heads, mlp_ratio) for _ in range(depth)
-        ])
-        self.norm = nn.LayerNorm(embed_dim)
+        assert embed_dim % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = self.head_dim ** -0.5
 
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return self.norm(x)
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3)
+        self.proj = nn.Linear(embed_dim, embed_dim)
 
+        self.relative_position_bias_table = nn.Parameter(
+            torch.zeros((2 * seq_len - 1), num_heads)
+        )  # (2L-1, H)
+        coords = torch.arange(seq_len)
+        relative_coords = coords[None, :] - coords[:, None]  # (L, L)
+        relative_coords += seq_len - 1
+        self.register_buffer("relative_position_index", relative_coords, persistent=False)
 
-class TransformerDecoder(nn.Module):
-    def __init__(self, depth, embed_dim, num_heads, mlp_ratio):
-        super().__init__()
-        self.layers = nn.ModuleList([
-            TransformerBlock(embed_dim, num_heads, mlp_ratio) for _ in range(depth)
-        ])
-        self.norm = nn.LayerNorm(embed_dim)
+        nn.init.trunc_normal_(self.relative_position_bias_table, std=0.02)
 
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return self.norm(x)
+    def forward(self, x):  # x: (B, L, C)
+        B, L, C = x.shape
+        qkv = self.qkv(x).reshape(B, L, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.unbind(dim=2)  # (B, L, H, D)
+        q = q.transpose(1, 2)  # (B, H, L, D)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
 
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # (B, H, L, L)
+
+        rel_pos_index = self.relative_position_index[:L, :L].reshape(-1)
+        rel_pos_bias = self.relative_position_bias_table[rel_pos_index]
+        rel_pos_bias = rel_pos_bias.view(L, L, self.num_heads).permute(2, 0, 1)  # (H, L, L)
+        attn = attn + rel_pos_bias.unsqueeze(0)  # broadcast to (B, H, L, L)
+
+        attn = attn.softmax(dim=-1)
+        out = attn @ v  # (B, H, L, D)
+        out = out.transpose(1, 2).reshape(B, L, C)
+        out = self.proj(out)
+        return out
 
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_dim, num_heads, mlp_ratio):
+    def __init__(self, embed_dim, num_heads, mlp_ratio, seq_len):
         super().__init__()
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.attn = RelPosMultiheadAttention(embed_dim, num_heads, seq_len)
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
         self.mlp = nn.Sequential(
@@ -103,9 +114,35 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(self, x):
-        x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0]
+        x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
         return x
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, depth, embed_dim, num_heads, mlp_ratio, seq_len):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            TransformerBlock(embed_dim, num_heads, mlp_ratio, seq_len) for _ in range(depth)
+        ])
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return self.norm(x)
+
+class TransformerDecoder(nn.Module):
+    def __init__(self, depth, embed_dim, num_heads, mlp_ratio, seq_len):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            TransformerBlock(embed_dim, num_heads, mlp_ratio, seq_len) for _ in range(depth)
+        ])
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return self.norm(x)
 
 
 def sinogram_mae_build(configs=None):
@@ -123,6 +160,17 @@ def sinogram_mae_build(configs=None):
     else:
         model = SinogramMAE()
     return model
+
+
+def grad_loss(pred, target):
+    # Sobel kernels
+    gx = torch.tensor([[1,0,-1],[2,0,-2],[1,0,-1]], dtype=pred.dtype, device=pred.device).view(1,1,3,3)
+    gy = gx.transpose(-1, -2)
+    def sobel(x):
+        sx = F.conv2d(x, gx, padding=1)
+        sy = F.conv2d(x, gy, padding=1)
+        return torch.sqrt(sx*sx + sy*sy + 1e-6)
+    return F.l1_loss(sobel(pred), sobel(target))
 
 
 if __name__ == "__main__":
