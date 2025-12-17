@@ -1,9 +1,13 @@
+import os
+import sys
 import random
 import glob
 import cv2
 import numpy as np
 from torch.utils.data import Dataset
 from tqdm import tqdm
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils import min_max_normalize  # 修改匯入
 
 
 def add_detector_unevenness(sinogram, block_size_range=(16, 128), variation_range=(0.8, 1.2)):
@@ -50,8 +54,6 @@ class Sinogram_Data_Random_Shift(Dataset):
         self.sinograms = []
         for f in tqdm(sino_files, desc='load sinograms', dynamic_ncols=True):
             sino_temp = cv2.imread(f, cv2.IMREAD_GRAYSCALE).astype(np.float32)
-            # sino_temp = sino_temp-sino_temp.min(axis=1)[:, None]
-            # sino_temp = sino_temp/sino_temp.max(axis=1)[:, None]
             self.sinograms.append(sino_temp/255)
 
     def random_shift(self, sino_gt):
