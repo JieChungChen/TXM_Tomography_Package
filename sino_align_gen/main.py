@@ -5,16 +5,16 @@ import matplotlib.pyplot as plt
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from preprocess import Sinogram_Data_Random_Shift
-from generator import sinogram_mae_build, grad_loss
+from generator import sinogram_mae_build, grad_loss, helgason_ludwig_loss
 from tqdm import tqdm
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('diffusion for background correction', add_help=False)
     parser.add_argument('--train', default=True, type=bool)
-    parser.add_argument('--configs', default='sino_align_gen/configs/sino_align_gen_v1.yml', type=str)
+    parser.add_argument('--configs', default='configs/sino_align_gen_v1.yml', type=str)
     return parser
 
 
@@ -36,9 +36,24 @@ def main(args):
     criterion = nn.MSELoss() # L1 seems to be better than MSE
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=trn_conf['base_lr'], weight_decay=trn_conf['weight_decay'])
+    scheduler = None
+    warmup_epochs = 0
+    if trn_conf.get('use_cosine_annealing', False):
+        warmup_epochs = trn_conf.get('warmup_epochs', 5)
+        T_max = trn_conf.get('T_max') or trn_conf['n_epochs']
+        eta_min = trn_conf.get('eta_min', trn_conf['base_lr'] * 0.01)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=T_max - warmup_epochs, eta_min=eta_min
+        )
+        print(f"Cosine Annealing enabled: warmup={warmup_epochs} epochs, T_max={T_max}, eta_min={eta_min}")
     model.train()
     
     for epoch in range(trn_conf['n_epochs']):
+        if scheduler is not None and epoch < warmup_epochs:
+            warmup_lr = trn_conf['base_lr'] * (epoch + 1) / warmup_epochs
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = warmup_lr
+                
         step = 0
         loss_accum = 0
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
@@ -46,11 +61,12 @@ def main(args):
                 sino_gt = sino_gt.float().to(device)
                 shifted_sino = shifted_sino.float().to(device)
 
-                with autocast():
+                with autocast(device.type):
                     pred_sino = model(shifted_sino)
                     mse_loss = criterion(pred_sino, sino_gt)
                     grad_loss_val = grad_loss(pred_sino.unsqueeze(1), sino_gt.unsqueeze(1))
-                    loss = mse_loss + 0.2 * grad_loss_val
+                    sino_loss = helgason_ludwig_loss(pred_sino)
+                    loss = mse_loss + 0.2 * grad_loss_val + 0.5 * sino_loss
 
                 if scaler:
                     scaler.scale(loss).backward()
@@ -81,7 +97,8 @@ def main(args):
             ax[1].set_title('Predicted')
             ax[2].imshow(sino_gt[5].cpu().detach().numpy(), cmap='gray', vmin=0, vmax=1)
             ax[2].set_title('Ground Truth')
-            plt.savefig('sino_align_gen/temp/sino_epoch_'+str(epoch+1)+'.jpeg', dpi=300)
+            fig.tight_layout()
+            plt.savefig('temp/sino_epoch_'+str(epoch+1)+'.jpeg', dpi=300)
             plt.close()
 
         if (epoch+1)%trn_conf['save_n_epochs'] == 0:

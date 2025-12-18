@@ -14,6 +14,8 @@ class SinogramMAE(nn.Module):
         self.proj_embed = nn.Linear(img_size, embed_dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_projections, embed_dim))
+        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.num_projections, decoder_embed_dim))
 
         # Encoder
         self.encoder = TransformerEncoder(depth=depth, embed_dim=embed_dim,
@@ -22,9 +24,9 @@ class SinogramMAE(nn.Module):
 
         # Decoder
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim)
-        self.decoder = TransformerDecoder(depth=decoder_depth, embed_dim=decoder_embed_dim,
-                                          num_heads=decoder_num_heads, mlp_ratio=mlp_ratio,
-                                          seq_len=self.num_projections)
+        self.decoder = HybridDecoder(depth=decoder_depth, embed_dim=decoder_embed_dim,
+                                     num_heads=decoder_num_heads, mlp_ratio=mlp_ratio,
+                                     seq_len=self.num_projections)
 
         # Head
         self.decoder_pred = nn.Linear(decoder_embed_dim, img_size)  
@@ -50,21 +52,25 @@ class SinogramMAE(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, max_mask_len=30):
+    def forward(self, x, max_mask_len=30, mask_len=None):
         # x: (B, 181, 512)
-        seq_len = 181 - random.randint(0, max_mask_len)
+        if mask_len is not None:
+            seq_len = 181 - mask_len
+        else:
+            seq_len = 181 - random.randint(0, max_mask_len)
         B = x.shape[0]
-        x = self.proj_embed(x)
+        x = self.proj_embed(x) + self.pos_embed
         x = self.encoder(x[:, :seq_len, :])
+
         x = self.decoder_embed(x)
         x = torch.cat([x, self.mask_token.repeat(B, 181 - seq_len, 1)], dim=1)
+        x = x + self.decoder_pos_embed
         x = self.decoder(x)
         x = self.decoder_pred(x)          # (B, 181, 512)
         x = x.unsqueeze(1)                # (B, 1, 181, 512)
         x = self.refine_head(x)           # conv refine
         x = x.squeeze(1)                  # (B, 181, 512)
         return x
-
 # ---------------- Relative Pos Encoding in Attention ----------------
 
 class RelPosMultiheadAttention(nn.Module):
@@ -109,6 +115,7 @@ class RelPosMultiheadAttention(nn.Module):
         out = self.proj(out)
         return out
 
+
 class TransformerBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, mlp_ratio, seq_len):
         super().__init__()
@@ -125,6 +132,7 @@ class TransformerBlock(nn.Module):
         x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
         return x
+
 
 class TransformerEncoder(nn.Module):
     def __init__(self, depth, embed_dim, num_heads, mlp_ratio, seq_len):
@@ -144,6 +152,57 @@ class TransformerDecoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([
             TransformerBlock(embed_dim, num_heads, mlp_ratio, seq_len) for _ in range(depth)
+        ])
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return self.norm(x)
+    
+
+class DepthwiseConvPyramid(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.branch1 = nn.Conv1d(channels, channels, kernel_size=3, padding=1, groups=channels)
+        self.branch2 = nn.Conv1d(channels, channels, kernel_size=3, padding=2, dilation=2, groups=channels)
+        self.branch3 = nn.Conv1d(channels, channels, kernel_size=3, padding=4, dilation=4, groups=channels)
+        self.proj = nn.Conv1d(channels * 3, channels, kernel_size=1)
+        self.bn = nn.BatchNorm1d(channels)
+        self.act = nn.GELU()
+
+    def forward(self, x):
+        b1 = self.branch1(x)
+        b2 = self.branch2(x)
+        b3 = self.branch3(x)
+        out = torch.cat([b1, b2, b3], dim=1)
+        out = self.proj(out)
+        return self.act(self.bn(out))
+
+
+class HybridDecoderBlock(nn.Module):
+    def __init__(self, embed_dim, num_heads, mlp_ratio, seq_len):
+        super().__init__()
+        self.global_block = TransformerBlock(embed_dim, num_heads, mlp_ratio, seq_len)
+        self.local_norm = nn.LayerNorm(embed_dim)
+        self.conv_pyramid = DepthwiseConvPyramid(embed_dim)
+        self.local_proj = nn.Linear(embed_dim, embed_dim)
+        self.gate = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        x = self.global_block(x)
+        local = self.local_norm(x).transpose(1, 2)
+        local = self.conv_pyramid(local).transpose(1, 2)
+        local = self.local_proj(local)
+        return x + self.gate * local
+
+
+class HybridDecoder(nn.Module):
+    def __init__(self, depth, embed_dim, num_heads, mlp_ratio, seq_len):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            HybridDecoderBlock(embed_dim, num_heads, mlp_ratio, seq_len)
+            for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(embed_dim)
 
@@ -179,6 +238,38 @@ def grad_loss(pred, target):
         sy = F.conv2d(x, gy, padding=1)
         return torch.sqrt(sx*sx + sy*sy + 1e-6)
     return F.l1_loss(sobel(pred), sobel(target))
+
+
+def helgason_ludwig_loss(sinogram, max_order=2):
+    """
+    sinogram: (B, P, T)  P=投影角數, T=detector長度
+    angles: (P,)  以弧度表示
+    """
+    B, P, T = sinogram.shape
+    device = sinogram.device
+    angles = torch.linspace(0, torch.pi, P, device=device)
+    t = torch.linspace(-1.0, 1.0, T, device=device)
+    weights = torch.ones_like(t)
+    sinogram = sinogram * weights.view(1, 1, -1)
+
+    loss = 0.0
+    cos_t = torch.cos(angles)
+    sin_t = torch.sin(angles)
+
+    for n in range(max_order + 1):
+        # moment: ∫ s^n g(θ, s) ds
+        moment = torch.einsum('pt,bpt->bp', t.pow(n).unsqueeze(0).repeat(P, 1), sinogram)
+        # build HL basis
+        basis = []
+        for m in range(n + 1):
+            basis.append((cos_t ** (n - m)) * (sin_t ** m))
+        Phi = torch.stack(basis, dim=1)  # (P, n+1)
+        # least squares projection
+        pinv = torch.linalg.pinv(Phi)
+        coeff = torch.matmul(pinv, moment.transpose(0,1))          # (n+1, B)
+        recon = torch.matmul(Phi, coeff).transpose(0,1)            # (B, P)
+        loss += F.mse_loss(recon, moment)
+    return loss / (max_order + 1)
 
 
 if __name__ == "__main__":
