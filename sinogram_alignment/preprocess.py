@@ -3,7 +3,36 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from recon_algorithms import radon_transform_torch
+
+
+def add_detector_unevenness(sinogram, block_size_range=(16, 128)):
+    """
+    模擬檢測器像素感應不均的效果，對每個 projection 的像素分成隨機大小的塊，每個塊應用隨機增益。
+    
+    :param sinogram: 輸入的 sinogram (numpy array, shape: (n_angles, image_size))
+    :param block_size_range: 塊大小範圍 (e.g., (8, 32) 表示 8-32 像素寬)
+    :param variation_range: 每個塊的隨機增益範圍 (e.g., 0.8-1.2 表示 ±20% 變化)
+    :return: 添加不均勻效果後的 sinogram
+    """
+    h, w = sinogram.shape  # (n_angles, image_size)
+    uneven_sinogram = sinogram.copy().astype(np.float32)
+    
+    # 對每個 projection (每一行)，將寬度分成隨機大小的塊
+    for i in range(h):  # 遍歷每個角度 (projection)
+        j = 0
+        while j < w:
+            # 隨機選擇塊大小
+            block_size = np.random.randint(*block_size_range)
+            end_j = min(j + block_size, w)
+            # 隨機生成增益因子
+            gain = np.random.normal(1, 0.05)
+            # 應用到整個塊
+            uneven_sinogram[i, j:end_j] *= gain
+            j = end_j
+    
+    # 確保值在合理範圍
+    uneven_sinogram = np.clip(uneven_sinogram, 0, 1)  # 假設 sinogram 已歸一化到 0-1
+    return uneven_sinogram
 
 
 class Sinogram_Data_Random_Shift(Dataset):
@@ -19,16 +48,16 @@ class Sinogram_Data_Random_Shift(Dataset):
         
         self.sinograms = []
         for f in tqdm(sino_files, desc='load sinograms', dynamic_ncols=True):
-            sino_temp = np.array(Image.open(f))
-            sino_temp = sino_temp-sino_temp.min(axis=1)[:, None]
-            sino_temp = sino_temp/sino_temp.max(axis=1)[:, None]
+            sino_temp = np.array(Image.open(f)) / 255
             sino_temp = 1 - sino_temp
             self.sinograms.append(sino_temp)
 
     def random_shift(self, sino_gt, apply_mask=True):
+        sino_gt = add_detector_unevenness(sino_gt.copy())
+        sino_gt = np.random.poisson(sino_gt * 1000) / 1000 
         shifted_sino = sino_gt.copy()
         n_proj, size = sino_gt.shape
-
+        
         # if not 181 degree -> zero padding
         if n_proj < self.full_proj:
             sino_temp = np.zeros((self.full_proj, size))
@@ -72,55 +101,10 @@ class Sinogram_Data_Random_Shift(Dataset):
     def __len__(self):
         return len(self.sinograms)  
     
-    def generate_shift_curve(self, num_proj, max_shift, shift_mode='mixed'):
+    def generate_shift_curve(self, num_proj, max_shift):
         x = np.arange(num_proj)
-        if shift_mode == 'mixed':
-            shift = (
-                np.random.normal(0, max_shift*0.5) +
-                np.random.uniform(0, max_shift*0.5) * np.sin(2 * np.pi * np.random.uniform(0.05, 0.3) * x) +
-                np.random.uniform(-max_shift*0.5, max_shift*0.5, size=num_proj)
-            )
-        elif shift_mode == 'global':
-            shift = np.ones_like(x) * np.random.uniform(-max_shift, max_shift)
-        elif shift_mode == 'wave':
-            freq = np.random.uniform(0.05, 0.3)
-            amp = np.random.uniform(0.3, max_shift)
-            shift = amp * np.sin(2 * np.pi * freq * x)
-        elif shift_mode == 'jitter':
-            shift = np.random.normal(0, 1.5, size=num_proj)
-        elif shift_mode == 'block':
-            shift = np.zeros_like(x)
-            start = np.random.randint(0, num_proj - 30)
-            shift[start:start+30] = np.random.uniform(-max_shift, max_shift)
-        else:
-            shift = np.zeros_like(x)
+        shift = (
+            np.random.uniform(0, max_shift*0.5) * np.sin(2 * np.pi * np.random.uniform(0.02, 0.2) * x) +
+            np.random.uniform(-max_shift*0.5, max_shift*0.5, size=num_proj)
+        )
         return shift
-    
-
-def image_to_sino(raw_img_dir='data_test/test_imgs', save_dir='data_test/sino_test'):
-    raw_files = sorted(glob.glob(f'{raw_img_dir}/*'))
-    print(f'Total number of images: {len(raw_files)}')
-
-    for f in tqdm(raw_files, dynamic_ncols=True):
-        im = Image.open(f)
-        if im.format == 'TIFF': # TXM or simulation images
-            # to 8 bit
-            im = np.array(im.resize((1024, 1024)))
-            im = im-im.min()
-            im = im/im.max()
-            im = np.uint8((im*255).round())
-
-        else: # rgb images from imagenet
-            w, h = im.size
-            max_size = max([w, h])
-            new_im = Image.new('L', (max_size, max_size), (0))
-            new_im.paste(im.convert('L'), ((max_size-w)//2, (max_size-h)//2))
-            im = np.array(new_im.resize((1024, 1024)))
-
-        theta = np.linspace(0.0, np.pi, 181)
-        sino_temp = radon_transform_torch(im, theta, sub_sample=0.5)
-        sino_temp = sino_temp-sino_temp.min()
-        sino_temp = sino_temp/sino_temp.max()
-        im = Image.fromarray(sino_temp)
-        filename = f.split("/")[-1]
-        im.save(f'{save_dir}/{filename}')

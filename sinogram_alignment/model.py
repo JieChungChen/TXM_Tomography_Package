@@ -1,32 +1,10 @@
-import math
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.0, max_len=181):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(1, max_len, d_model)
-        pe[0, :, 0::2] = torch.sin(position * div_term)
-        pe[0, :, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        """
-        x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
-        """
-        x = x + self.pe[:, :x.size(1)]
-        return self.dropout(x)
-    
-
 class RelativePositionalEncoding(nn.Module):
-    def __init__(self, head_dim, max_len=500):
+    def __init__(self, head_dim, max_len=181):
         super().__init__()
         self.rel_pos = nn.Parameter(torch.randn(2 * max_len - 1, head_dim))  # [2L-1, head_dim]
         self.proj = nn.Linear(head_dim, 1, bias=False)  # 將每個相對位置的embedding投影成scalar bias
@@ -59,7 +37,7 @@ class MultiHeadAttentionWithRPE(nn.Module):
     def forward(self, x, mask=None):
         B, T, _ = x.size()
         qkv = self.qkv_proj(x).reshape(B, T, 3, self.n_head, self.head_dim)
-        q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]  # [B, T, n_head, head_dim]
+        q, k, v = qkv.unbind(dim=2)
         q = q.permute(0, 2, 1, 3)  # [B, n_head, T, head_dim]
         k = k.permute(0, 2, 1, 3)
         v = v.permute(0, 2, 1, 3)
@@ -114,7 +92,6 @@ class EncoderLayer(nn.Module):
     
 
 class PositionwiseFeedForward(nn.Module):
-    # applied along the last dimension
     def __init__(self, d_model, hidden, drop_prob=0.1):
         super(PositionwiseFeedForward, self).__init__()
         self.linear1 = nn.Linear(d_model, hidden)
@@ -131,43 +108,59 @@ class PositionwiseFeedForward(nn.Module):
     
 
 class Alignment_Block(nn.Module):
-    def __init__(self, ch, ffn_hidden, n_head, depth, drop_prob, rpe=True):
+    def __init__(self, embed_dim, mlp_ratio, num_heads, depth, drop_prob, num_projs, rpe=True):
         super().__init__()
         self.rpe = rpe
-        self.pos_emb = PositionalEncoding(ch)
-        self.att_blocks = nn.ModuleList([EncoderLayer(ch, ffn_hidden, n_head, drop_prob) for _ in range(depth)])
-        self.spt = SpatialTransformer([181, ch])
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_projs, embed_dim))
+        self.att_blocks = nn.ModuleList([EncoderLayer(embed_dim, mlp_ratio*embed_dim, num_heads, drop_prob) 
+                                         for _ in range(depth)])
+        self.spt = SpatialTransformer([num_projs, embed_dim])
         self.mlp = nn.Sequential(
-            nn.Linear(ch, 64),
+            nn.Linear(embed_dim, 64),
             nn.ReLU(),
             nn.Linear(64, 1)
         ) 
+        nn.init.trunc_normal_(self.pos_embed, std=.02)
 
-    def forward(self, x, mask=None):
-        B, N, L = x.shape
-        h = x
-        if not self.rpe:
-            h = self.pos_emb(x)
-        for i, layer in enumerate(self.att_blocks):
-            h = layer(h, mask=mask)
-        shift = self.mlp(h)
-        flow = torch.zeros((B, 2, N, L)).to(x.device)
-        for proj in range(N):
-            flow[:, 1, proj] = shift[:, proj]*50/256
-        x = self.spt(x.unsqueeze(1), flow).reshape(B, N, L)
+    def forward(self, x_0, max_shift=50, mask=None):
+        B, N, L = x_0.shape
+
+        x = x_0 + self.pos_embed
+        for layer in self.att_blocks:
+            x = layer(x, mask=mask)
+        shift = self.mlp(x)
+
+        flow = torch.zeros((B, 2, N, L), device=x_0.device)
+        flow[:, 1] = (shift * max_shift / (L // 2)).expand(-1, -1, L)
+        x = self.spt(x_0.unsqueeze(1), flow).reshape(B, N, L)
         return shift, x
 
 
 class Alignment_Net(nn.Module):
-    def __init__(self, configs):
+    def __init__(self, embed_dim=512, num_att_blocks=4, num_align_blocks=2, num_heads=4, mlp_ratio=4, dropout=0.1):
         super().__init__()
-        ch = configs['ch']
-        depth = configs['num_att_blocks']
-        n_align = configs['num_align_blocks']
-        dropout = configs['dropout']
-        self.align_blocks = nn.ModuleList([Alignment_Block(ch, 2*ch, 4, depth, dropout) for _ in range(n_align)])
+        self.num_projections = 181
+        self.align_blocks = nn.ModuleList([Alignment_Block(embed_dim=embed_dim, 
+                                                           mlp_ratio=mlp_ratio, 
+                                                           num_heads=num_heads, 
+                                                           depth=num_att_blocks, 
+                                                           drop_prob=dropout,
+                                                           num_projs = self.num_projections) 
+                                           for _ in range(num_align_blocks)])
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x, mask=None):
+        B, N, L = x.shape
+
         for i, layer in enumerate(self.align_blocks):
             shift, x = layer(x, mask=mask)
             if i == 0:
@@ -198,128 +191,22 @@ class SpatialTransformer(nn.Module):
         return F.grid_sample(src, new_locs, mode=self.mode, align_corners=False, padding_mode='border')
     
 
-class Filter_Back_Projection(nn.Module):
-    def __init__(self, img_size, filtered=False):
-        super().__init__()
-        self.img_size_padded = max(64, int(2 ** np.ceil(np.log2(2 * img_size))))
-        self.filtered = filtered
-        center = img_size//2
-        x, y = torch.meshgrid(
-            torch.arange(img_size) - center,
-            torch.arange(img_size) - center,
-            indexing='ij')
-        self.register_buffer("hann", self.get_hann_filter(self.img_size_padded))
-        self.register_buffer("x", x)
-        self.register_buffer("y", y)
-        recon_0 =self.empty_recon(img_size, torch.linspace(0, np.pi, 181))
-        self.register_buffer("recon_0", recon_0)
-        
-    def empty_recon(self, img_size, angles):
-        recon = torch.zeros((img_size, img_size))
-        sino_empty = torch.ones((1, len(angles), img_size))
-        if self.filtered:
-            pad_width = (0, self.img_size_padded - img_size)
-            sino_padded = torch.nn.functional.pad(sino_empty, pad_width, 'constant', 0)
-            sino_fft = torch.fft.fft(sino_padded, dim=-1)
-            sino_empty = torch.real(torch.fft.ifft(sino_fft * self.hann, dim=-1))[:, :, :img_size]
-        for i, theta in enumerate(angles):
-            t = self.x * torch.cos(theta+torch.pi/2) + self.y * torch.sin(theta+torch.pi/2)
-            t_idx = torch.round(t + img_size//2).long()  
-            valid = (t_idx >= 0) & (t_idx < img_size)
-            recon[valid] += sino_empty[0, i, t_idx[valid]]
-        return recon
-    
-    def forward(self, sino, angles, circle=True):
-        B, n_proj, L = sino.shape
-        center = L//2
-        if self.filtered:
-            pad_width = (0, self.img_size_padded - L)
-            sino_padded = torch.nn.functional.pad(sino, pad_width, 'constant', 0)
-            sino_fft = torch.fft.fft(sino_padded, dim=-1)
-            sino = torch.real(torch.fft.ifft(sino_fft * self.hann, dim=-1))[:, :, :L]
-        
-        recon = torch.zeros((B, L, L), device=sino.device)
-        for i, theta in enumerate(angles):
-            # 計算各theta下reconstruction每個pixel投影在sinogram上的座標
-            t = self.x * torch.cos(theta+torch.pi/2) + self.y * torch.sin(theta+torch.pi/2)
-            t_norm = 2 * t / (L - 1)  # [-1, 1] for grid_sample
-
-            # grid_sample 要求 shape: [B, 1, H, W]
-            t_norm = t_norm.unsqueeze(0).unsqueeze(0).repeat(B, 1, 1, 1)  # [B, 1, H, W]
-
-            # 提取該角度對應的 sinogram
-            sino_i = sino[:, i, :].unsqueeze(1).unsqueeze(2)  # [B, 1, 1, L]
-
-            # 建立 grid: (x = 投影位置, y = dummy 0)
-            grid = torch.stack((t_norm, torch.zeros_like(t_norm)), dim=-1)  # [B, 1, H, W, 2]
-
-            # 使用 grid_sample 把 sinogram 投影值拉回影像座標
-            sampled = F.grid_sample(sino_i.float(), grid.squeeze(), mode='bilinear', align_corners=True, padding_mode='zeros')
-            recon += sampled[:, 0]
-
-        if circle:
-            Y, X = np.ogrid[:L, :L]
-            dist_from_center = np.sqrt((X - center)**2 + (Y - center)**2)
-            mask = dist_from_center > center
-            recon[:, mask] = 0
-        else:
-            recon /= self.recon_0
-        return recon
-    
-    def get_hann_filter(self, img_size):
-        n = torch.concatenate((torch.arange(1, img_size / 2 + 1, 2, dtype=int),
-                               torch.arange(img_size / 2 - 1, 0, -2, dtype=int)))
-        f = torch.zeros(img_size)
-        f[0] = 0.25
-        f[1::2] = -1 / (torch.pi * n) ** 2
-        ramp = 2 * torch.real(torch.fft.fft(f))
-        hann = torch.from_numpy(np.hanning(img_size))
-        return ramp * torch.fft.fftshift(hann)
-
-
-class FBPLoss(nn.Module):
-    def __init__(self, img_size, filtered=True):
-        super().__init__()
-        self.fbp = Filter_Back_Projection(img_size, filtered)
-        self.tv = TVLoss()
-        self.mse = nn.MSELoss()
-
-    def forward(self, sino_pred, sino_true, angles):
-        recon_pred = self.fbp(sino_pred, angles)
-        recon_true = self.fbp(sino_true, angles)
-        # recon_true = gaussian_blur(recon_true, [15, 15])
-
-        loss_mse = self.mse(recon_pred, recon_true)
-        loss_tv = self.tv(recon_pred, sino=False)
-        return loss_mse+loss_tv
-    
-    def get_fbp_results(self, sino_pred, sino_true, angles, circle):
-        recon_pred = self.fbp(sino_pred, angles, circle)
-        recon_true = self.fbp(sino_true, angles, circle)
-        return recon_pred, recon_true
+def sino_align_transformer_builder(configs=None):
+    if configs is not None:
+        model = Alignment_Net(
+            embed_dim=configs.get('embed_dim', 512),
+            num_att_blocks=configs.get('num_att_blocks', 4),
+            num_align_blocks=configs.get('num_align_blocks', 2),
+            num_heads=configs.get('num_heads', 4),
+            mlp_ratio=configs.get('mlp_ratio', 4),
+            dropout=configs.get('dropout', 0.1),
+        )
+    else:
+        model = Alignment_Net()
+    return model
     
 
-class TVLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x, sino=True):
-        # assume x: [B, H, W]
-        dh = torch.abs(x[:, :-1, :] - x[:, 1:, :])
-        dw = torch.abs(x[:, :, :-1] - x[:, :, 1:])
-        if sino:
-            loss =  dh.mean()
-        else:
-            weight_h = torch.exp(-torch.abs(dh))
-            weight_w = torch.exp(-torch.abs(dw))
-            loss = (weight_h * dh**2).mean() + (weight_w * dw**2).mean()
-        return loss
-        
-
-def shift_range_penalty(shift_pred, max_shift=2):
-    # shift_pred: shape (B, N), predicted shift values
-    over_upper = torch.relu(shift_pred - max_shift)
-    under_lower = torch.relu(-max_shift - shift_pred)
-    penalty = over_upper + under_lower
-    return torch.mean(penalty**2)
-    
+if __name__ == "__main__":
+    from torchinfo import summary
+    model = Alignment_Net()
+    summary(model, input_size=(2, 181, 512))
