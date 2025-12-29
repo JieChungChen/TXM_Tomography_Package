@@ -4,19 +4,22 @@ data_settings:
   max_shift: 50
   
 training_settings:
-  trn_data_dir: data_train/real_sino
+  trn_data_dir: D:/Datasets/Icon_Sino
   model_save_dir: checkpoints
-  ckpt_path: alignment_ep100.pt
+  ckpt_path: ~
   device: cuda:0
   n_epochs: 1000
   save_n_epochs: 100
+  visualize_n_epochs: 1
   batch_size: 32
   base_lr: 2.e-4
   weight_decay: 1.e-4
   grad_clip: 1
 
 model_settings:
-  ch: 512
+  embed_dim: 512
   num_att_blocks: 4
   num_align_blocks: 1
+  num_heads: 4
+  mlp_ratio: 4
   dropout: 0.1
