@@ -33,14 +33,29 @@ def main(args):
         model.load_state_dict(torch.load(trn_conf['model_save_dir']+'/'+trn_conf['ckpt_path'], map_location=device))
 
     dataset = Sinogram_Data_Random_Shift(trn_conf['trn_data_dir'], data_conf['max_shift'])
-    dataloader = DataLoader(dataset, batch_size=trn_conf['batch_size'], num_workers=0, shuffle=True, pin_memory=True, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=trn_conf['batch_size'], num_workers=4, shuffle=True, pin_memory=True, drop_last=True)
     
     criterion_shift = nn.HuberLoss() # L1 seems to be better than MSE
     optimizer = torch.optim.AdamW(model.parameters(), lr=trn_conf['base_lr'], weight_decay=trn_conf['weight_decay'])
+    scheduler = None
+    warmup_epochs = 0
+    if trn_conf.get('use_cosine_annealing', False):
+        warmup_epochs = trn_conf.get('warmup_epochs', 5)
+        T_max = trn_conf.get('T_max') or trn_conf['n_epochs']
+        eta_min = trn_conf.get('eta_min', trn_conf['base_lr'] * 0.01)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=T_max - warmup_epochs, eta_min=eta_min
+        )
+        print(f"Cosine Annealing enabled: warmup={warmup_epochs} epochs, T_max={T_max}, eta_min={eta_min}")
     model.train()
     
     loss_profile = []
     for epoch in range(trn_conf['n_epochs']):
+        if scheduler is not None and epoch < warmup_epochs:
+            warmup_lr = trn_conf['base_lr'] * (epoch + 1) / warmup_epochs
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = warmup_lr
+
         step = 0
         loss_shift_accum, loss_sino_accum = 0, 0
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
