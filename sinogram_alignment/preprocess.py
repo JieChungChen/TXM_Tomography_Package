@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 
-def add_detector_unevenness(sinogram, block_size_range=(16, 128)):
+def add_detector_unevenness(sinogram, block_size_range=(16, 48), variation_range=(0.9, 1.1)):
     """
     模擬檢測器像素感應不均的效果，對每個 projection 的像素分成隨機大小的塊，每個塊應用隨機增益。
     
@@ -19,16 +19,17 @@ def add_detector_unevenness(sinogram, block_size_range=(16, 128)):
     
     # 對每個 projection (每一行)，將寬度分成隨機大小的塊
     for i in range(h):  # 遍歷每個角度 (projection)
-        j = 0
-        while j < w:
-            # 隨機選擇塊大小
-            block_size = np.random.randint(*block_size_range)
-            end_j = min(j + block_size, w)
-            # 隨機生成增益因子
-            gain = np.random.normal(1, 0.05)
-            # 應用到整個塊
-            uneven_sinogram[i, j:end_j] *= gain
-            j = end_j
+        # 隨機控制點位置
+        step = np.random.randint(*block_size_range)
+        ctrl_x = np.arange(0, w + step, step)
+        if ctrl_x[-1] < w:  # 確保包含尾端
+            ctrl_x = np.append(ctrl_x, w)
+        # 隨機控制點增益
+        ctrl_y = np.random.uniform(variation_range[0], variation_range[1], size=ctrl_x.shape[0])
+        # 線性插值為平滑曲線
+        gain_curve = np.interp(np.arange(w), ctrl_x, ctrl_y)
+        # 可選：再用高斯平滑
+        uneven_sinogram[i] *= gain_curve
     
     # 確保值在合理範圍
     uneven_sinogram = np.clip(uneven_sinogram, 0, 1)  # 假設 sinogram 已歸一化到 0-1
@@ -47,14 +48,27 @@ class Sinogram_Data_Random_Shift(Dataset):
             sino_files = sorted(glob.glob(f'{data_dir}/*tif'))
         
         self.sinograms = []
+        self.is_simu = []
         for f in tqdm(sino_files, desc='load sinograms', dynamic_ncols=True):
+            if f.endswith('sino.tif'):
+                self.is_simu.append(True)
+            else:
+                if random.random() < 0.65: # randomly skip some real data to balance the dataset
+                    continue
+                self.is_simu.append(False)
+
             sino_temp = np.array(Image.open(f)) / 255
+            n_proj, size = sino_temp.shape
+            if size != 512:
+                sino_temp = Image.fromarray(sino_temp).resize((512, n_proj), Image.BILINEAR)
+                sino_temp = np.array(sino_temp)
             sino_temp = 1 - sino_temp
             self.sinograms.append(sino_temp)
 
-    def random_shift(self, sino_gt, apply_mask=True):
-        sino_gt = add_detector_unevenness(sino_gt.copy())
-        sino_gt = np.random.poisson(sino_gt * 1000) / 1000 
+    def random_shift(self, sino_gt, is_simu, apply_mask=True):
+        if is_simu:
+            sino_gt = add_detector_unevenness(sino_gt.copy())
+            sino_gt = np.random.poisson(sino_gt * 1000) / 1000 
         shifted_sino = sino_gt.copy()
         n_proj, size = sino_gt.shape
         
@@ -96,7 +110,8 @@ class Sinogram_Data_Random_Shift(Dataset):
 
     def __getitem__(self, index):
         sino = self.sinograms[index].copy()
-        return self.random_shift(sino)
+        is_simu = self.is_simu[index]
+        return self.random_shift(sino, is_simu)
 
     def __len__(self):
         return len(self.sinograms)  

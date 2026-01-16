@@ -36,25 +36,44 @@ def apply_shift(sinogram, shifts):
     return sinogram
 
 
-def inference_alignment(model_path='checkpoints/alignment_ep1000.pt', 
-                        data_path='D:/Datasets/TXM_Sino/tomo4-E-b2-60s-181p_sino/sino_0210.tif'
-                        , sample_id=20, max_shift=50, n_iter=1, seed=None):
+def inference_alignment(model_path='checkpoints/alignment_ep500.pt', 
+                        data_path='temp/sino_0138.tif'
+                        , sample_id=20, max_shift=50, n_iter=5, seed=2):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with open('configs/alignment_self_att_v3.yml', 'r') as f:
         configs = yaml.safe_load(f)
 
-    if seed is not None:
-        random.seed(seed)
-        np.random.seed(seed)
-
     if os.path.isfile(data_path):
         raw_sino = cv2.imread(data_path, cv2.IMREAD_GRAYSCALE)
-        raw_sino = min_max_normalize(raw_sino, 99.9)
+        raw_sino = raw_sino.astype(np.float32)
+        if raw_sino.shape[1] != 512:
+            raw_sino = cv2.resize(raw_sino, (512, raw_sino.shape[0]), interpolation=cv2.INTER_LINEAR)
+
+        for i in range(raw_sino.shape[0]):
+            raw_sino[i, :] = min_max_normalize(raw_sino[i, :].copy(), 99.9)
+        # raw_sino = min_max_normalize(raw_sino, 99.9)
+        raw_sino = 1 - raw_sino
     else:
         sino_folders = glob.glob(f'{data_path}/*')
         sino_files = [glob.glob(f'{f}/*tif') for f in sino_folders]
         raw_sino = cv2.imread(sino_files[sample_id], cv2.IMREAD_GRAYSCALE) / 255
 
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+        
+        x = np.arange(len(raw_sino))
+        shift = (
+            np.random.uniform(0, max_shift*0.5) * np.sin(2 * np.pi * np.random.uniform(0.02, 0.2) * x) +
+            np.random.uniform(-max_shift*0.5, max_shift*0.5, size=len(raw_sino))
+        ).astype(int)
+        gt_sino = raw_sino.copy()
+        for i in range(len(raw_sino)):
+            raw_sino[i, :] = np.roll(raw_sino[i, :], shift[i])
+    else:
+        gt_sino = None
+
+    
     model = sino_align_transformer_builder(configs['model_settings']).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
     model.eval()
@@ -83,37 +102,45 @@ def inference_alignment(model_path='checkpoints/alignment_ep1000.pt',
             sino_temp = apply_shift(sino_temp.squeeze(), -pred_shift)
     pred_sino = sino_temp.cpu().detach().squeeze().numpy()
             
-    fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(10, 4.5))
-    gs = axs[0, -1].get_gridspec()
-    for ax in axs[:, -1]:
-        ax.remove()
+    fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(11, 5))
 
     # select specific angles
-    # true_shifts = true_shifts[:n_projs]
     total_shift = total_shift[:n_projs]
 
-    # plot ground truth
-    recon_temp = recon_fbp_astra(raw_sino)
-    axs[0, 0].set_title('Ground Truth', weight='bold')
-    axs[0, 0].imshow(recon_temp, cmap='gray', interpolation='none')
-    axs[0, 0].axis('off')
+    # plot gt
+    if gt_sino is not None:
+        recon_temp = recon_fbp_astra(gt_sino, norm=False)
+        glob_min, glob_max = recon_temp.min(), recon_temp.max()
+        recon_temp = (recon_temp - glob_min) / (glob_max - glob_min)
+        hfer_gt = high_freq_energy_ratio(recon_temp)
+        axs[0, 0].set_title('Ground Truth', weight='bold')
+        axs[0, 0].text(5, 25, f'HFER: {hfer_gt:.1e}', color='yellow', weight='bold', bbox=dict(facecolor='black', alpha=0.5))
+        axs[0, 0].imshow(recon_temp, cmap='gray', interpolation='none', vmin=0, vmax=1)
+        axs[0, 0].axis('off')
 
     # plot the FBP reconstruction of raw sinogram
-    recon_temp = recon_fbp_astra(raw_sino)
-    axs[0, 1].imshow(recon_temp, cmap='gray', interpolation='none')
+    recon_temp = recon_fbp_astra(raw_sino, norm=False)
+    recon_temp = (recon_temp - glob_min) / (glob_max - glob_min)
+    hfer_raw = high_freq_energy_ratio(recon_temp)
+    axs[0, 1].imshow(recon_temp, cmap='gray', interpolation='none', vmin=0, vmax=1)
+    axs[0, 1].text(5, 25, f'HFER: {hfer_raw:.1e}', color='yellow', weight='bold', bbox=dict(facecolor='black', alpha=0.5))
     axs[0, 1].set_title('Raw', weight='bold')
     axs[0, 1].axis('off')
 
     # plot the corrected reconstruction
-    recon_temp = recon_fbp_astra(pred_sino)
-    axs[0, 2].imshow(recon_temp, cmap='gray', interpolation='none')
+    recon_temp = recon_fbp_astra(pred_sino, norm=False)
+    recon_temp = (recon_temp - glob_min) / (glob_max - glob_min)
+    hfer_cor = high_freq_energy_ratio(recon_temp)
+    axs[0, 2].imshow(recon_temp, cmap='gray', interpolation='none', vmin=0, vmax=1)
+    axs[0, 2].text(5, 25, f'HFER: {hfer_cor:.1e}', color='yellow', weight='bold', bbox=dict(facecolor='black', alpha=0.5))
     axs[0, 2].set_title('Corrected', weight='bold')
     axs[0, 2].axis('off')
 
     # plot true sinogram
-    axs[1, 0].imshow(raw_sino, cmap='gray', interpolation='none')
-    axs[1, 0].set_xlabel('position (pixel)')
-    axs[1, 0].set_ylabel('degree')
+    if gt_sino is not None:
+        axs[1, 0].imshow(gt_sino, cmap='gray', interpolation='none')
+        axs[1, 0].set_xlabel('position (pixel)')
+        axs[1, 0].set_ylabel('degree')
 
     # plot the shifted sinogram
     axs[1, 1].imshow(raw_sino, cmap='gray', interpolation='none')
@@ -125,20 +152,24 @@ def inference_alignment(model_path='checkpoints/alignment_ep1000.pt',
     axs[1, 2].set_xlabel('position (pixel)')
     axs[1, 2].set_ylabel('degree')
 
-    # plot the error
-    # axbig = fig.add_subplot(gs[:, -1])
-    # axbig.set_title('Alignment Error', weight='bold')
-    # axbig.scatter(true_shifts, -total_shift, c='tab:red', s=6, alpha=0.7)
-    # axbig.plot([-50, 50], [-50, 50], ls='--', c='black')
-    # axbig.set_xlabel('ground truth (pixel)')
-    # axbig.set_ylabel('prediction (pixel)')
-    # mae = np.mean(np.abs(true_shifts+total_shift))
-    # axbig.text(x=1, y=-16, s='MAE=%.1f'%(mae))
-    # axbig.set_aspect('equal')
-
     fig.tight_layout()
     plt.savefig('temp/infer_result.jpeg', bbox_inches='tight')
     plt.close()
+
+
+def high_freq_energy_ratio(img, f0=0.035):
+    from scipy.ndimage import gaussian_filter
+    img = gaussian_filter(img, sigma=1)
+    F = np.fft.fftshift(np.fft.fft2(img))
+    power = np.abs(F) ** 2
+
+    H, W = img.shape
+    fy = np.fft.fftshift(np.fft.fftfreq(H))
+    fx = np.fft.fftshift(np.fft.fftfreq(W))
+    FX, FY = np.meshgrid(fx, fy)
+    R = np.sqrt(FX**2 + FY**2)
+
+    return power[R > f0].sum() / power.sum()
 
 
 if __name__=='__main__':
