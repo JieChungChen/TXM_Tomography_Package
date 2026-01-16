@@ -7,12 +7,13 @@ import numpy as np
 import cv2
 from tqdm import tqdm
 from recon_algorithms import recon_fbp_astra, radon_transform_torch
+from utils import min_max_normalize
 
 
 def icon_augmentation(icon):
-    scale = random.uniform(0.2, 0.9) 
+    scale = random.uniform(0.1, 0.5) 
     h, w = icon.shape[:2]
-    resized_icon = np.zeros_like(icon)
+    resized_icon = np.zeros_like(icon) + icon[0, 0]
     new_w, new_h = int(w * scale), int(h * scale)
     icon = cv2.resize(icon, (new_w, new_h), interpolation=cv2.INTER_AREA)
     resized_icon[(h - new_h) // 2:(h - new_h) // 2 + new_h, (w - new_w) // 2:(w - new_w) // 2 + new_w] = icon
@@ -53,7 +54,7 @@ def add_background_texture(image):
     return textured_image
 
 
-def add_detector_unevenness(sinogram, block_size_range=(16, 128), variation_range=(0.8, 1.2)):
+def add_detector_unevenness(sinogram, block_size_range=(16, 48), variation_range=(0.9, 1.1)):
     """
     模擬檢測器像素感應不均的效果，對每個 projection 的像素分成隨機大小的塊，每個塊應用隨機增益。
     
@@ -67,16 +68,17 @@ def add_detector_unevenness(sinogram, block_size_range=(16, 128), variation_rang
     
     # 對每個 projection (每一行)，將寬度分成隨機大小的塊
     for i in range(h):  # 遍歷每個角度 (projection)
-        j = 0
-        while j < w:
-            # 隨機選擇塊大小
-            block_size = np.random.randint(*block_size_range)
-            end_j = min(j + block_size, w)
-            # 隨機生成增益因子
-            gain = np.random.normal(1, 0.05)
-            # 應用到整個塊
-            uneven_sinogram[i, j:end_j] *= gain
-            j = end_j
+        # 隨機控制點位置
+        step = np.random.randint(*block_size_range)
+        ctrl_x = np.arange(0, w + step, step)
+        if ctrl_x[-1] < w:  # 確保包含尾端
+            ctrl_x = np.append(ctrl_x, w)
+        # 隨機控制點增益
+        ctrl_y = np.random.uniform(variation_range[0], variation_range[1], size=ctrl_x.shape[0])
+        # 線性插值為平滑曲線
+        gain_curve = np.interp(np.arange(w), ctrl_x, ctrl_y)
+        # 可選：再用高斯平滑
+        uneven_sinogram[i] *= gain_curve
     
     # 確保值在合理範圍
     uneven_sinogram = np.clip(uneven_sinogram, 0, 1)  # 假設 sinogram 已歸一化到 0-1
@@ -87,7 +89,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Icon to TXM Sinogram Generator")
     parser.add_argument('--input_dir', type=str, default='D:/Datasets/Icon_Dataset')
     parser.add_argument('--output_dir', type=str, default='D:/Datasets/Icon_Sino')
-    parser.add_argument('--image_size', type=int, default=512)
+    parser.add_argument('--image_size', type=int, default=732)
     return parser.parse_args()
 
 
@@ -96,42 +98,44 @@ def main(args):
     target_size = args.image_size
 
     for folder in icon_folders:
-        files = sorted(glob.glob(os.path.join(folder, '*.png')))
+        exts = ('*.png', '*.jpg', '*.jpeg')
+        files = sorted([p for ext in exts for p in glob.glob(os.path.join(folder, ext))])
         save_path = os.path.join(args.output_dir, os.path.basename(folder))
         os.makedirs(save_path, exist_ok=True)
         for f in tqdm(files, desc=f"Processing {os.path.basename(folder)}"):
-            img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+            img = cv2.imread(f, cv2.IMREAD_UNCHANGED)
+            alpha_channel = img[..., -1]
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+            background = alpha_channel == 0
+            gray_avg = np.mean(img[~background]).astype(int)
+            img[background] = random.randint(gray_avg-10, gray_avg+10)
             if img.shape[0] !=  target_size or img.shape[1] != target_size:
                 img = cv2.resize(img, (target_size, target_size), interpolation=cv2.INTER_AREA)
 
             # generate txm-like sinogram
             img = icon_augmentation(img)
-            sino = radon_transform_torch(img, np.linspace(0, np.pi, 181), circle=False, sub_sample=1)
-            background_lumi = random.uniform(0.3, 0.6)
-            sino = ((sino/np.max(sino)) * (1-background_lumi) + background_lumi)
+            sino = radon_transform_torch(img, np.linspace(0, np.pi, 181), circle=False, sub_sample=0.7)
+            sino = min_max_normalize(sino)
             
             sino = add_detector_unevenness(sino)
-            # decay_factor = 0.8
-            # decay_mask = np.exp(-np.random.rand(*sino.shape) * (1 - decay_factor))
-            # sino *= decay_mask
 
             sino = np.random.poisson(sino * 1000) / 1000 
             # sino = add_projection_contrast(sino, intensity_range=(0.7, 1.3))
 
             # save sinogram
-            base_name = os.path.basename(f).replace('.png', '_sino.png')
+            base_name, ext = os.path.splitext(os.path.basename(f))
+            new_filename = base_name + '_sino.tif'
             sino = np.clip(sino, 0, 1)
             sino = 1 - sino
             sino = (sino * 255).astype(np.uint8)
-            cv2.imwrite(os.path.join(save_path, base_name), sino)
-
+            cv2.imwrite(os.path.join(save_path, new_filename), sino)
+            
             # visualize
             recon = recon_fbp_astra(sino, angle_interval=1, norm=True)
             plt.imshow(recon, cmap='gray')
             plt.title('Reconstructed Image')
             plt.show()
             plt.close()
-
 
 
 if __name__ == '__main__':
