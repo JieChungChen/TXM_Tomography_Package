@@ -88,6 +88,16 @@ def find_duplicate_angles(thetas: np.ndarray):
     return duplicates
 
 
+def angle_sort(images: np.ndarray, thetas: np.ndarray):
+    """
+    根據角度對影像和角度進行排序。
+    """
+    sorted_indices = np.argsort(thetas)
+    sorted_images = images[sorted_indices]
+    sorted_thetas = thetas[sorted_indices]
+    return sorted_images, sorted_thetas
+
+
 def image_resize(img, size):
     from PIL import Image
     img = Image.fromarray(img)

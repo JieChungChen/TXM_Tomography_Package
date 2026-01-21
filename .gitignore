@@ -6,3 +6,5 @@ temp/
 *.tif
 *.pt
 *.mp4
+*.pyc
+*.xrm

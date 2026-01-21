@@ -10,7 +10,7 @@ class TXM_Images:
         初始化 TXM 影像容器。
 
         Args:
-            images: 3D NumPy 陣列，形狀為（N, H, W）
+            images: 3D NumPy 陣列, 形狀為 (N, H, W)
             mode: 'tomo' 或 'mosaic'
             metadata: 中繼資料字典
             angles: 斷層影像的旋轉角度陣列
@@ -51,6 +51,9 @@ class TXM_Images:
     
     def set(self, idx, image):
         self.images[idx] = image
+
+    def set_full_images(self, images):
+        self.images = images
 
     def flip_vertical(self):
         self.images = np.flip(self.images, axis=1)

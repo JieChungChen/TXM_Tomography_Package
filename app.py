@@ -4,18 +4,14 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
 from PyQt5.QtWidgets import QProgressDialog, QApplication, QMainWindow, QFileDialog, QMessageBox, QDialog
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QTimer
-from src.gui.duplicates_selector import resolve_duplicates
-from src.gui.contrast_dialog import ContrastDialog
-from src.gui.manual_alignment import AlignViewer
-from src.gui.fbp_viewer import FBPViewer, FBPResolutionDialog
-from src.gui.mosaic_viewer import MosaicPreviewDialog
-from src.gui.yshift_dialog import ShiftDialog
+from src.gui import (AlignViewer, AIRefRemoverDialog, ContrastDialog, FBPViewer, 
+                     FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, resolve_duplicates)
 from src.gui.main_window import Ui_TXM_ToolBox
 from src.logic import data_io
 from src.logic.app_context import AppContext
 from src.logic.image_container import TXM_Images
 from src.logic.fbp import FBPWorker
-from src.logic.utils import norm_to_8bit, find_duplicate_angles
+from src.logic.utils import norm_to_8bit, find_duplicate_angles, angle_sort
 from src.logic.decorators import handle_errors
 
 
@@ -53,6 +49,8 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_alignment.triggered.connect(self.open_align_viewer)
         self.ui.action_reconstruction.triggered.connect(self.get_fbp_result)
         self.ui.action_full_view.triggered.connect(self.mosaic_stitching)
+
+        self.ui.actionAI_Reference.triggered.connect(self.ref_ai_remover)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -95,6 +93,8 @@ class TXM_ToolBox(QMainWindow):
 
         if duplicates:
             images, angles = resolve_duplicates(images, angles, duplicates, ref, file_names)
+        else:
+            images, angles = angle_sort(images, angles)
 
         self.context.images = TXM_Images(images, 'tomo', angles=angles)
         self.update_env()
@@ -184,6 +184,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_alignment.setEnabled(self.context.mode == 'tomo')
         self.ui.action_reconstruction.setEnabled(self.context.mode == 'tomo')
         self.ui.action_full_view.setEnabled(self.context.mode == 'mosaic')
+        self.ui.actionAI_Reference.setEnabled(True)
 
         self.ui.imageSlider.setMinimum(0)
         self.ui.imageSlider.setMaximum(len(self.context.images) - 1)
@@ -268,6 +269,20 @@ class TXM_ToolBox(QMainWindow):
         if mosaic is not None:
             dialog = MosaicPreviewDialog(mosaic, self.context)
             dialog.exec_()
+
+    @handle_errors(title="AI Reference Remover Error")
+    def ref_ai_remover(self, *args):
+        if self.context.images is None:
+            QMessageBox.warning(self, "No Images", "Please load images first.")
+            return
+
+        # Run AI background removal
+        dialog = AIRefRemoverDialog(self.context.images, self)
+        if dialog.exec_() == QDialog.Accepted:
+            # Update images with processed ones
+            self.context.images.set_full_images(dialog.processed_images)
+            self.update_env()
+            self.show_info_message("AI Background Removal", f"Completed!")
 
     @handle_errors(title="Save Image Error")
     def save_image(self, save_mode):
