@@ -2,32 +2,78 @@
 
 同步輻射中心TLS BL01B, TXM Tomography相關演算法及模型整合包
 
-## recon_algorithms Module
+## Overview
 
-The `recon_algorithms` module contains implementations of various reconstruction algorithms. 
+This repository provides tools and algorithms for TXM (Transmission X-ray Microscopy) tomography image processing. It includes a PyQt5-based GUI for managing and processing TXM data, as well as core algorithms for reconstruction and alignment.
 
-### Available Functions
+## Features
 
-#### 1. `mlem_recon(sinogram, ang_inter, iter_count, mask)`
-- **Purpose**: Performs ML-EM reconstruction on a sinogram to reconstruct a 2D image.
+### `app.py` - TXM Toolbox GUI
+The `app.py` script provides a comprehensive GUI for TXM data processing. Key features include:
+- **File Loading**:
+  - Load `.txrm` or `.tif` files for tomography data.
+  - Load `.xrm` or `.tif` files for mosaic data.
+  - Load and merge multiple `.txrm` files by manually resolving duplicate angles.
+- **Image Manipulation**:
+- - Manually choose reference images.
+  - Vertical flipping.
+  - Y-axis shifting.
+  - Contrast adjustment.
+- **Reconstruction**:
+  - Perform FBP (Filtered Back Projection) reconstruction with customizable resolution and angle intervals (support gpu acceleration with astra-toolbox).
+- **Mosaic Stitching**:
+  - Stitch mosaic images.
+- **AI Tools**:
+  - Background correction using AI-based reference removal.
+- **Image Saving**:
+  - Save processed 8-bits `.tif` images in raw or normalized contrast.
 
-#### 2. `recon_fbp_astra(sinogram, angle_interval=1, norm=True)`
-- **Purpose**: Computes FBP to construct a 2D slice from a sinogram using Astra Toolbox.
+### `ref_remover_ddpm/txm_image_correction_gui.py` - Background Correction GUI
+This GUI focuses on background correction using DDPM (Denoising Diffusion Probabilistic Models). Features include:
+- GPU status display.
+- Progress tracking with ETA.
+- Image stack browsing and preview.
 
-#### 3. `radon_transform_astra(image, angles)`
-- **Purpose**: Computes the Radon transform of an image using Astra Toolbox.
+### Core Modules
+#### `recon_algorithms`
+- ML-EM and FBP reconstruction algorithms.
+- Radon transform implementations using Astra Toolbox and PyTorch.
 
-#### 4. `radon_transform_torch(image, theta, circle=False, fill_outside=True, sub_sample=1)`
-- **Purpose**: Computes the Radon transform using PyTorch, based on scikit-image's implementation.
+#### `sinogram_alignment`
+- AI Tools for sinogram alignment and preprocessing.
 
-### Installation and Usage
-- Install dependencies: `pip install torch astra numpy`
-- Example:
-  ```python
-  import numpy as np
-  from recon_algorithms import mlem_recon
-  
-  # Example sinogram and mask
-  sinogram = np.random.rand(181, 512)
-  mask = np.ones((512, 512))
-  result = mlem_recon(sinogram, ang_inter=1.0, iter_count=20, mask=mask)
+## Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/JieChungChen/TXM_Tomography_Package.git
+   cd TXM_Tomography_Package
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirement.txt
+   ```
+
+3. Install additional modules for specific features:
+   - Astra Toolbox for GPU-accelerated FBP:
+     ```bash
+     conda install -c astra-toolbox -c nvidia astra-toolbox==2.4.0
+     ```
+    - PyTorch for AI-based tools:
+      ```bash
+      pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu121
+      ```
+
+## Usage
+
+### Running the TXM Toolbox GUI
+1. Run the `app.py` script:
+   ```bash
+   python app.py
+   ```
+
+2. Use the GUI to load, process, and save TXM data.
+
+## License
+This project is licensed under the MIT License.
