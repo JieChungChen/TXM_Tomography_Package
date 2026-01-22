@@ -49,13 +49,8 @@ This GUI focuses on background correction using DDPM (Denoising Diffusion Probab
    git clone https://github.com/JieChungChen/TXM_Tomography_Package.git
    cd TXM_Tomography_Package
    ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirement.txt
-   ```
-
-3. Install additional modules for specific features:
+   
+2. Install additional modules for specific features:
    - Astra Toolbox for GPU-accelerated FBP:
      ```bash
      conda install -c astra-toolbox -c nvidia astra-toolbox==2.4.0
@@ -64,6 +59,13 @@ This GUI focuses on background correction using DDPM (Denoising Diffusion Probab
       ```bash
       pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu121
       ```
+      
+3. Install dependencies:
+   ```bash
+   pip install -r requirement.txt
+   ```
+
+
 
 ## Usage
 
