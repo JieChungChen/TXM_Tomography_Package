@@ -1,11 +1,9 @@
-"""錯誤處理與記錄用的裝飾器。"""
 import functools
 import traceback
 from PyQt5.QtWidgets import QMessageBox
 
 
 def handle_errors(title="Error"):
-    """處理例外並顯示錯誤訊息視窗的裝飾器。"""
     def decorator(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):

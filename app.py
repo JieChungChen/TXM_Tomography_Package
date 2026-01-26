@@ -5,7 +5,8 @@ from PyQt5.QtWidgets import QProgressDialog, QApplication, QMainWindow, QFileDia
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QTimer
 from src.gui import (AlignViewer, AIRefRemoverDialog, ContrastDialog, FBPViewer, 
-                     FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, resolve_duplicates)
+                     FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, 
+                     ReferenceModeDialog, SplitSliderDialog, resolve_duplicates)
 from src.gui.main_window import Ui_TXM_ToolBox
 from src.logic import data_io
 from src.logic.app_context import AppContext
@@ -43,7 +44,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_save_norm.triggered.connect(lambda: self.save_image('each'))
         
         self.ui.action_vertical_flip.triggered.connect(self.vertical_flip)
-        self.ui.action_reference.triggered.connect(self.load_ref)
+        self.ui.action_reference.triggered.connect(self.load_reference)
         self.ui.action_y_shift.triggered.connect(self.apply_y_shift)
         self.ui.action_adjust_contrast.triggered.connect(self.open_contrast_dialog)
         self.ui.action_alignment.triggered.connect(self.open_align_viewer)
@@ -143,14 +144,33 @@ class TXM_ToolBox(QMainWindow):
         self.update_env()
 
     @handle_errors(title="Load Reference Error")
-    def load_ref(self, *args):
-        """載入背景 XRM 或 TIF 檔案。"""
-        filename, _ = QFileDialog.getOpenFileName(self, "Open reference file", "", "(*.xrm *.tif)")
-        if not filename:
+    def load_reference(self, *args):
+        mode_box = ReferenceModeDialog(self)
+        if mode_box.exec_() != QDialog.Accepted:
             return
-
-        ref = data_io.load_ref(filename)
-        self.context.images.apply_ref(ref)
+        mode = mode_box.mode
+        if mode == 'single':
+            filename, _ = QFileDialog.getOpenFileName(self, "Select Reference File", "", "(*.xrm *.tif)")
+            if not filename:
+                return
+            ref = data_io.load_ref(filename)
+            self.context.images.apply_ref(ref)
+        elif mode == 'dual':
+            num_imgs = len(self.context.images)
+            if num_imgs < 2:
+                QMessageBox.warning(self, "Insufficient Images", "Dual reference mode requires at least 2 images!")
+                return
+            dlg = SplitSliderDialog(num_imgs, self)
+            if dlg.exec_() != QDialog.Accepted:
+                return
+            filename1, filename2 = dlg.get_refs()
+            split_idx = dlg.get_split()
+            if not filename1 or not filename2:
+                QMessageBox.warning(self, "Missing Reference Files", "Please select two reference files!")
+                return
+            ref1 = data_io.load_ref(filename1)
+            ref2 = data_io.load_ref(filename2)
+            self.context.images.apply_ref(ref1, ref2, split_idx)
         self.update_image(self.ui.imageSlider.value())
 
     def update_image(self, index=0):

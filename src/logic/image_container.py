@@ -61,11 +61,33 @@ class TXM_Images:
     def y_shift(self, shift_amount):
         self.images = np.roll(self.images, shift_amount, axis=1)
 
-    def apply_ref(self, ref_image):
-        if ref_image is not None:
-            self.ref = ref_image
-            if self.images.shape[-1] != self.ref.shape[-1]:
-                self.images = self.original / image_resize(ref_image, self.images.shape[-1])
-            else:
-                self.images = self.original / ref_image
+    def apply_ref(self, ref_image1, ref_image2=None, split_point=None):
+        """
+        apply reference image(s) to the TXM images.
+
+        Parameters
+        ----------
+        ref_image1 : np.ndarray
+            The first reference image.
+        ref_image2 : np.ndarray, optional
+        split_point : int, optional
+            The index to split the images for dual reference application.
+        """
+        if ref_image1 is not None and ref_image2 is None and split_point is None:
+            # Single reference
+            self.ref = ref_image1
+            ref_resized = image_resize(ref_image1, self.images.shape[-1])
+            self.images = self.original / ref_resized
+        elif ref_image1 is not None and ref_image2 is not None and split_point is not None:
+            # Dual reference
+            imgs = np.zeros_like(self.original, dtype=np.float32)
+            # First half
+            ref1_resized = image_resize(ref_image1, imgs.shape[-1])
+            imgs[:split_point] = self.original[:split_point] / ref1_resized
+            # Second half
+            ref2_resized = image_resize(ref_image2, imgs.shape[-1])
+            imgs[split_point:] = self.original[split_point:] / ref2_resized
+            self.images = imgs
+        else:
+            pass
 

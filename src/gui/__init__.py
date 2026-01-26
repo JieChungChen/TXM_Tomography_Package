@@ -5,6 +5,7 @@ from src.gui.fbp_viewer import FBPResolutionDialog, FBPViewer
 from src.gui.manual_alignment import AlignViewer
 from src.gui.mosaic_viewer import MosaicPreviewDialog
 from src.gui.yshift_dialog import ShiftDialog
+from src.gui.reference_dialog import ReferenceModeDialog, SplitSliderDialog
 
 __all__ = [
     "AIRefRemoverDialog", 
@@ -13,4 +14,6 @@ __all__ = [
     "FBPResolutionDialog", 
     "FBPViewer", "AlignViewer", 
     "MosaicPreviewDialog", 
-    "ShiftDialog"]
+    "ShiftDialog",
+    "ReferenceModeDialog",
+    "SplitSliderDialog"]
