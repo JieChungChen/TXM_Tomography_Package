@@ -15,12 +15,36 @@ class ContrastDialog(QDialog):
         self.setWindowTitle("Adjust Contrast")
         self.setFixedSize(400, 250)
 
-        # 設定字體以提升可讀性。
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         from PyQt5.QtGui import QFont
         font = QFont("Calibri", 12)
         self.setFont(font)
 
         self.live_update_callback = live_update_callback
+
+        # 統一滑桿樣式
+        slider_style = """
+            QSlider::groove:horizontal {
+                border: 1px solid #bfbfbf;
+                height: 6px;
+                border-radius: 3px;
+                background: #dedede;
+            }
+            QSlider::handle:horizontal {
+                background: #1f6feb;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+        """
 
         # 下限裁切滑桿（最暗像素）。
         self.lower_slider = QSlider(Qt.Horizontal)
@@ -28,6 +52,7 @@ class ContrastDialog(QDialog):
         self.lower_slider.setMaximum(100)  # 0.0% ~ 10.0%
         self.lower_slider.setValue(int(init_clip_lower * 10))
         self.lower_slider.valueChanged.connect(self.on_value_changed)
+        self.lower_slider.setStyleSheet(slider_style)
 
         # 上限裁切滑桿（最亮像素）。
         self.upper_slider = QSlider(Qt.Horizontal)
@@ -35,6 +60,7 @@ class ContrastDialog(QDialog):
         self.upper_slider.setMaximum(100)  # 0.0% ~ 10.0%
         self.upper_slider.setValue(int(init_clip_upper * 10))
         self.upper_slider.valueChanged.connect(self.on_value_changed)
+        self.upper_slider.setStyleSheet(slider_style)
 
         # 標籤。
         self.lower_label = QLabel()

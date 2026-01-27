@@ -21,7 +21,7 @@ def read_txm_raw(filename: str, mode: str):
         For 'mosaic': (images: np.ndarray, metadata: dict, reference: np.ndarray or None)
         For 'single': (image: np.ndarray, metadata: dict, reference: np.ndarray or None)
     """
-    assert mode in ['tomo', 'mosaic', 'single'], 'Invalid mode!'
+    assert mode in ['tomo', 'mosaic', 'single'], 'invalid mode!'
 
     ole = olefile.OleFileIO(filename)
     n_img = len([entry for entry in ole.listdir() if entry[0] in ['ImageData1', 'ImageData2']])
@@ -204,13 +204,14 @@ def read_ole_metadata(ole, mode, n_img=None):
         number_of_images = n_img
     else:
         number_of_images = _read_ole_value(ole, "ImageInfo/NoOfImages", "<I")
+
     metadata = {
         'number_of_images': number_of_images,
         'image_width': _read_ole_value(ole, 'ImageInfo/ImageWidth', '<I'),
         'image_height': _read_ole_value(ole, 'ImageInfo/ImageHeight', '<I'),
-        'pixel_size': _read_ole_value(ole, 'ImageInfo/pixelsize', '<f'),
+        'exp_time': str(_read_ole_arr(ole, 'ImageInfo/ExpTimes', f'<{number_of_images}f')[0]) + ' sec',
         'data_type': _read_ole_value(ole, 'ImageInfo/DataType', '<1I'),
-        'reference_filename': _read_ole_value(ole, 'ImageInfo/referencefile', '<260s'),
+        'reference_file': _read_ole_value(ole, 'ImageInfo/referencefile', '<260s'),
         'reference_data_type': _read_ole_value(ole, 'referencedata/DataType', '<1I'),
                 }
     
@@ -223,7 +224,7 @@ def read_ole_metadata(ole, mode, n_img=None):
     ref_path = _read_ole_value(ole, 'ImageInfo/referencefile', '<260s')
     if ref_path is not None:
         ref_path = ref_path.strip(b'\x00').decode()
-        metadata['reference_filename'] = ref_path.split('\\')[-1]
+        metadata['reference_file'] = ref_path.split('\\')[-1]
     
     if ole.exists('ReferenceData/Image'):
         reference = _read_ole_image(ole, 'ReferenceData/Image', metadata, metadata['reference_data_type'], is_ref=True)

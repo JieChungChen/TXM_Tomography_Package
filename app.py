@@ -2,18 +2,14 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '.')) 
 from PyQt5.QtWidgets import QProgressDialog, QApplication, QMainWindow, QFileDialog, QMessageBox, QDialog
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
 from src.gui import (AlignViewer, AIRefRemoverDialog, ContrastDialog, FBPViewer, 
                      FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, 
                      ReferenceModeDialog, SplitSliderDialog, resolve_duplicates)
 from src.gui.main_window import Ui_TXM_ToolBox
-from src.logic import data_io
-from src.logic.app_context import AppContext
-from src.logic.image_container import TXM_Images
-from src.logic.fbp import FBPWorker
-from src.logic.utils import norm_to_8bit, find_duplicate_angles, angle_sort
-from src.logic.decorators import handle_errors
+from src.logic import (AppContext, TXM_Images, FBPWorker, data_io, norm_to_8bit, 
+                       find_duplicate_angles, angle_sort, handle_errors)
 
 
 class TXM_ToolBox(QMainWindow):
@@ -40,8 +36,8 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_mosaic_txrm.triggered.connect(self.load_mosaic)
         self.ui.action_mosaic_tifs.triggered.connect(lambda: self.load_tifs('mosaic'))
         self.ui.action_single_xrm.triggered.connect(self.load_single)
-        self.ui.action_save_raw.triggered.connect(lambda: self.save_image('global'))
-        self.ui.action_save_norm.triggered.connect(lambda: self.save_image('each'))
+        self.ui.action_save_raw.triggered.connect(lambda: self.save_image_as_tif('global'))
+        self.ui.action_save_norm.triggered.connect(lambda: self.save_image_as_tif('each'))
         
         self.ui.action_vertical_flip.triggered.connect(self.vertical_flip)
         self.ui.action_reference.triggered.connect(self.load_reference)
@@ -211,17 +207,15 @@ class TXM_ToolBox(QMainWindow):
         self.update_image()
 
     def vertical_flip(self, *args):
-        """對影像進行垂直翻轉。"""
         self.context.images.flip_vertical()
         self.update_image(self.current_id)
 
     def apply_y_shift(self, *args):
-        """對影像進行 Y 軸平移。"""
         h, w = self.context.get_image_size()
 
         dialog = ShiftDialog(h, self)
         dialog.apply_shift.connect(lambda amount: (
-            self.context.images.y_shift(amount),
+            self.context.images.apply_y_shift(amount),
             self.update_image(self.current_id),
         ) if amount != 0 else None) 
         dialog.exec_()
@@ -233,7 +227,6 @@ class TXM_ToolBox(QMainWindow):
         self.update_image(self.current_id)
 
     def open_contrast_dialog(self):
-        """開啟對比度調整對話框。"""
         ContrastDialog(
             init_clip_lower=self.clip_lower,
             init_clip_upper=self.clip_upper,
@@ -243,7 +236,6 @@ class TXM_ToolBox(QMainWindow):
 
     @handle_errors(title="Alignment Error")
     def open_align_viewer(self, *args):
-        """開啟手動對齊視窗。"""
         dialog = AlignViewer(self.context.images, self.context.last_load_dir)
         if dialog.exec_() == QDialog.Accepted:
             self.update_image(self.current_id)
@@ -284,7 +276,6 @@ class TXM_ToolBox(QMainWindow):
 
     @handle_errors(title="Mosaic Stitching Error")
     def mosaic_stitching(self, *args):
-        """顯示拼接預覽。"""
         mosaic = self.context.images.get_mosaic()
         if mosaic is not None:
             dialog = MosaicPreviewDialog(mosaic, self.context)
@@ -305,8 +296,7 @@ class TXM_ToolBox(QMainWindow):
             self.show_info_message("AI Background Removal", f"Completed!")
 
     @handle_errors(title="Save Image Error")
-    def save_image(self, save_mode):
-        """將影像儲存為 TIF 檔案。"""
+    def save_image_as_tif(self, save_mode):
         default_path = os.path.join(self.context.last_save_dir, f"{self.context.sample_name}.tif")
         filename, _ = QFileDialog.getSaveFileName(self, "Save images", default_path, "TIFF files (*.tif)")
         if not filename:
@@ -314,9 +304,7 @@ class TXM_ToolBox(QMainWindow):
 
         self.context.last_save_dir = os.path.dirname(filename)
         sample_name = os.path.splitext(os.path.basename(filename))[0]
-        data_io.save_tif(self.context.last_save_dir,
-                 sample_name,
-                         self.context.get_images(), save_mode)
+        data_io.save_tif(self.context.last_save_dir, sample_name, self.context.get_images(), save_mode)
 
         self.show_info_message("Save image", f"Success! TIF images saved to '{self.context.last_save_dir}'.")
     
@@ -326,6 +314,7 @@ class TXM_ToolBox(QMainWindow):
         else:
             text = info
         msg = QMessageBox(self)
+        msg.setFont(QFont("Calibri", 14))
         msg.setWindowTitle(title)
         msg.setText(text)
         msg.setIcon(QMessageBox.Information)

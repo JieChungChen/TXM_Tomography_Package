@@ -3,6 +3,7 @@ data_train/
 AI_align/
 temp/
 .github/
+servers/
 
 *.tif
 *.pt

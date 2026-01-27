@@ -15,6 +15,14 @@ class ShiftDialog(QDialog):
         self.setFixedSize(400, 300)
         self.shift_amount = 50  # 預設值
 
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         # 主版面配置。
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -60,7 +68,6 @@ class ShiftDialog(QDialog):
 
         # Apply按鈕
         apply_button = QPushButton("Apply")
-        apply_button.setStyleSheet("font-family: Calibri; font-size: 14pt;")
         apply_button.clicked.connect(lambda: self.apply_shift.emit(self.get_shift_amount()))
         layout.addWidget(apply_button)
 

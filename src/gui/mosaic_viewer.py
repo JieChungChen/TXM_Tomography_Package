@@ -30,8 +30,16 @@ class MosaicPreviewDialog(QDialog):
         self.setMinimumSize(900, 650)
         self.resize(1100, 820)
 
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         # 設定字體。
-        font = QFont("Calibri", 10)
+        font = QFont("Calibri", 14)
         self.setFont(font)
 
         # 以拼接資訊更新視窗標題。
@@ -42,19 +50,22 @@ class MosaicPreviewDialog(QDialog):
 
         # 影像標籤。
         self.img_label = QLabel()
+        self.img_label.setFont(QFont("Calibri", 14))
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.img_label.setStyleSheet("border-radius: 8px; background-color: #0d0d0d;")
 
         # 資訊標籤。
         self.info_label = QLabel()
+        self.info_label.setFont(QFont("Calibri", 14))
         self.info_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.info_label.setStyleSheet("font-family: Calibri; font-size: 11pt; color: #222; padding: 4px 0;")
+        self.info_label.setStyleSheet("font-family: Calibri; font-size: 14pt; color: #222; padding: 4px 0;")
         self.update_info_label()
 
         self.clip_range_label = QLabel()
+        self.clip_range_label.setFont(QFont("Calibri", 14))
         self.clip_range_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.clip_range_label.setStyleSheet("font-family: Calibri; font-size: 10pt; color: #555;")
+        self.clip_range_label.setStyleSheet("font-family: Calibri; font-size: 14pt; color: #555;")
 
         self.pending_lower = int(self.clip_lower * 10)
         self.pending_upper = int(self.clip_upper * 10)
@@ -77,6 +88,22 @@ class MosaicPreviewDialog(QDialog):
         """
 
         self.lower_slider = QSlider(Qt.Horizontal)
+        # 統一滑桿樣式
+        slider_style = """
+            QSlider::groove:horizontal {
+                border: 1px solid #bfbfbf;
+                height: 6px;
+                border-radius: 3px;
+                background: #dedede;
+            }
+            QSlider::handle:horizontal {
+                background: #1f6feb;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+        """
         self.lower_slider.setMinimum(0)
         self.lower_slider.setMaximum(100)
         self.lower_slider.setValue(self.pending_lower)
@@ -91,12 +118,14 @@ class MosaicPreviewDialog(QDialog):
         self.upper_slider.valueChanged.connect(self.on_slider_changed)
 
         self.lower_value_label = QLabel()
+        self.lower_value_label.setFont(QFont("Calibri", 14))
         self.lower_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.lower_value_label.setStyleSheet("font-family: Calibri; font-size: 11pt; min-width: 60px; color: #222;")
+        self.lower_value_label.setStyleSheet("font-family: Calibri; font-size: 14pt; min-width: 60px; color: #222;")
 
         self.upper_value_label = QLabel()
+        self.upper_value_label.setFont(QFont("Calibri", 14))
         self.upper_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.upper_value_label.setStyleSheet("font-family: Calibri; font-size: 11pt; min-width: 60px; color: #222;")
+        self.upper_value_label.setStyleSheet("font-family: Calibri; font-size: 14pt; min-width: 60px; color: #222;")
 
         # 滑桿更新去彈跳計時器（降低延遲）。
         self.update_timer = QTimer()
@@ -105,18 +134,8 @@ class MosaicPreviewDialog(QDialog):
 
         # 儲存按鈕。
         self.save_btn = QPushButton("Save Image")
+        self.save_btn.setFont(QFont("Calibri", 14))
         self.save_btn.setFixedWidth(140)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1f6feb;
-                border-radius: 6px;
-                color: white;
-                font-weight: 600;
-                padding: 8px 0;
-            }
-            QPushButton:hover { background-color: #4b85ff; }
-            QPushButton:pressed { background-color: #0b4ac6; }
-        """)
         self.save_btn.clicked.connect(self.save_image)
 
         # 版面配置。
@@ -151,10 +170,6 @@ class MosaicPreviewDialog(QDialog):
         contrast_title = QLabel("Contrast Controls")
         contrast_title.setStyleSheet("font-family: Calibri; font-size: 13pt; font-weight: 600; color: #222;")
         contrast_layout.addWidget(contrast_title)
-
-        contrast_desc = QLabel("Clip the darkest and brightest pixels to highlight subtle details.")
-        contrast_desc.setStyleSheet("font-family: Calibri; font-size: 10pt; color: #555;")
-        contrast_layout.addWidget(contrast_desc)
 
         lower_row = QHBoxLayout()
         lower_label = QLabel("Dark Clip")

@@ -111,7 +111,15 @@ class AIRefRemoverDialog(QDialog):
         self.setFixedSize(600, 700)
         self.setModal(True)
 
-        font = QFont("Calibri", 12)
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
+        font = QFont("Calibri", 14)
         self.setFont(font)
 
         layout = QVBoxLayout()
@@ -120,7 +128,9 @@ class AIRefRemoverDialog(QDialog):
         # GPU 狀態顯示
         gpu_layout = QHBoxLayout()
         gpu_label = QLabel("GPU 狀態:")
+        gpu_label.setFont(QFont("Calibri", 14))
         self.gpu_status_label = QLabel("檢測中…")
+        self.gpu_status_label.setFont(QFont("Calibri", 14))
         self.gpu_status_label.setFixedHeight(20)
         gpu_layout.addWidget(gpu_label)
         gpu_layout.addWidget(self.gpu_status_label)
@@ -134,17 +144,21 @@ class AIRefRemoverDialog(QDialog):
 
         # Run button
         self.run_button = QPushButton("Run Inference")
+        self.run_button.setFont(QFont("Calibri", 14))
         self.run_button.clicked.connect(self.run_inference)
         layout.addWidget(self.run_button)
 
         # Progress bar + ETA + Cancel
         progress_layout = QHBoxLayout()
         self.progress_bar = QProgressBar()
+        self.progress_bar.setFont(QFont("Calibri", 14))
         self.progress_bar.setAlignment(Qt.AlignCenter)
         self.eta_label = QLabel("剩餘時間: -")
+        self.eta_label.setFont(QFont("Calibri", 14))
         self.eta_label.setAlignment(Qt.AlignCenter)
         self.eta_label.setFixedHeight(20)
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setFont(QFont("Calibri", 14))
         self.cancel_button.clicked.connect(self.cancel_inference)
         self.cancel_button.setEnabled(False)
         progress_layout.addWidget(self.progress_bar)
@@ -154,12 +168,14 @@ class AIRefRemoverDialog(QDialog):
 
         # Status label
         self.status_label = QLabel("準備開始推論...")
+        self.status_label.setFont(QFont("Calibri", 14))
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setFixedHeight(30)
         layout.addWidget(self.status_label)
 
         # Image preview
         self.image_label = QLabel("Preview.")
+        self.image_label.setFont(QFont("Calibri", 14))
         self.image_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.image_label)
 
@@ -171,6 +187,23 @@ class AIRefRemoverDialog(QDialog):
         scroll_layout.addWidget(self.index_label)
 
         self.scrollbar = QScrollBar(Qt.Horizontal)
+        # 統一滑桿樣式
+        slider_style = """
+            QSlider::groove:horizontal {
+                border: 1px solid #bfbfbf;
+                height: 6px;
+                border-radius: 3px;
+                background: #dedede;
+            }
+            QSlider::handle:horizontal {
+                background: #1f6feb;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+        """
+        self.scrollbar.setStyleSheet(slider_style)
         self.scrollbar.setEnabled(False)
         self.scrollbar.valueChanged.connect(self.scrollbar_changed)
         scroll_layout.addWidget(self.scrollbar)
@@ -179,8 +212,11 @@ class AIRefRemoverDialog(QDialog):
     def create_path_input(self, label_text, default="", filter=None, is_dir=False):
         layout = QHBoxLayout()
         label = QLabel(label_text)
+        label.setFont(QFont("Calibri", 14))
         line_edit = QLineEdit(default)
+        line_edit.setFont(QFont("Calibri", 14))
         browse_btn = QPushButton("Browse")
+        browse_btn.setFont(QFont("Calibri", 14))
         if is_dir:
             browse_btn.clicked.connect(lambda: self.browse_dir(line_edit))
         else:

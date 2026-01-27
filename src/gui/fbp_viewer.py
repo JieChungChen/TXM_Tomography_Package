@@ -19,6 +19,14 @@ class FBPResolutionDialog(QDialog):
         self.setWindowTitle("FBP Reconstruction Settings")
         self.setFixedSize(450, 500)
 
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         # 檢查astra套件是否可用
         self.astra_available = self.check_astra()
 
@@ -108,7 +116,6 @@ class FBPResolutionDialog(QDialog):
 
         # 按鈕。
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.setStyleSheet("font-family: Calibri; font-size: 14pt;")
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -154,6 +161,14 @@ class FBPViewer(QDialog):
         # 設定視窗屬性。
         self.setFixedSize(800, 800)
 
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         # 設定字體。
         font = QFont("Calibri", 10)
         self.setFont(font)
@@ -171,6 +186,23 @@ class FBPViewer(QDialog):
 
         # 滑桿。
         self.slider = QSlider(Qt.Horizontal)
+        # 統一滑桿樣式
+        slider_style = """
+            QSlider::groove:horizontal {
+                border: 1px solid #bfbfbf;
+                height: 6px;
+                border-radius: 3px;
+                background: #dedede;
+            }
+            QSlider::handle:horizontal {
+                background: #1f6feb;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+        """
+        self.slider.setStyleSheet(slider_style)
         self.slider.setMinimum(0)
         self.slider.setMaximum(self.n_slices - 1)
         self.slider.valueChanged.connect(self.update_image)

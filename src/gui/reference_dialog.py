@@ -7,6 +7,14 @@ class ReferenceModeDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Choose Reference Mode")
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         font = QFont("Calibri", 14)
         label = QLabel("Please choose to apply one or two references?")
         label.setFont(font)
@@ -34,6 +42,14 @@ class SplitSliderDialog(QDialog):
     def __init__(self, max_value, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Dual Reference and Split Point")
+        # 統一 Dialog 外觀
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
         from PyQt5.QtGui import QFont
         font = QFont("Calibri", 14)
         # 檔案欄位1
@@ -56,6 +72,23 @@ class SplitSliderDialog(QDialog):
         self.ref2_btn.clicked.connect(self.browse_ref2)
         # 分割點滑桿
         self.slider = QSlider(Qt.Horizontal)
+        # 統一滑桿樣式
+        slider_style = """
+            QSlider::groove:horizontal {
+                border: 1px solid #bfbfbf;
+                height: 6px;
+                border-radius: 3px;
+                background: #dedede;
+            }
+            QSlider::handle:horizontal {
+                background: #1f6feb;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+        """
+        self.slider.setStyleSheet(slider_style)
         self.slider.setMinimum(1)
         self.slider.setMaximum(max_value-1)
         self.slider.setValue(max_value//2)

@@ -21,7 +21,7 @@ class AppContext:
         self.mode = mode
 
     def get_images(self):
-        return self.images.get_array()
+        return self.images.get_full_images()
 
     def get_image_size(self):
         if self.images is not None:
