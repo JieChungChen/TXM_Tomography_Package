@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (QLabel, QDialog, QPushButton, QVBoxLayout, QSizePol
                              QHBoxLayout, QSlider, QFileDialog)
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QImage, QPixmap, QFont
-from src.logic.utils import norm_to_8bit
+from src.logic.utils import norm_hs_to_8bit
 
 
 class AlignViewer(QDialog):
@@ -31,30 +31,32 @@ class AlignViewer(QDialog):
         self.setWindowTitle("Align Viewer")
         self.setFixedSize(1600, 900)
         self.setModal(True)
-        self.setStyleSheet("""
-            QDialog {
-                border: 1px solid #e2e2e2;
-                border-radius: 12px;
-                background: #fafbfc;
-            }
-        """)
 
         # load tomography data
         self.tomo = tomography
-        self.proj_images = [norm_to_8bit(img.copy()) for img in self.tomo.get_full_images()]
+        self.proj_images = self.tomo.get_norm_images()
         self.last_dir = last_dir
-        self.n_proj = len(self.proj_images)
-        self.raw_size = self.proj_images[0].shape[0]
+        self.n_proj, self.raw_size, _ = self.proj_images.shape
         self.rotational_center = {'x': self.raw_size // 2, 'y': self.raw_size // 2}
 
         # GUI variables
         self.view_scale = 1.0
         self.max_scale = 3.0
         self.min_scale = 0.75
-        self.index = len(self.proj_images) // 2
-        self.shifts = [[0, 0] for _ in range(len(self.proj_images))]
+        self.index = self.n_proj // 2
+        self.line_color = (0, 255, 0, 128)
         self.line_y = 100
+        self.changing_center = False
+        self.tomo_zoomed = False
         self.dragging_line = False
+        
+        # tomography variables
+        self.shifts = [[0, 0] for _ in range(self.n_proj)] # list of [y_shift, x_shift]
+        self.tomo_vertex = (0, 0)
+
+        # horizontal sum variables
+        self.hs_array = np.array(self.proj_images).sum(axis=2).T
+        self.hs_array = norm_hs_to_8bit(self.hs_array)
 
         # sinogram variables
         self.sino_array = None
@@ -70,7 +72,7 @@ class AlignViewer(QDialog):
         self._init_slider()
         self._setup_layout()
         self.sino_label.installEventFilter(self)
-        self.update_all()
+        self.resize_view()
 
     def _init_labels(self):
         self.img_label = QLabel("Tomography")
@@ -105,11 +107,15 @@ class AlignViewer(QDialog):
         self.load_btn = QPushButton('Load shifts')
         self.load_btn.setToolTip('Load shifts from a text file')
         self.done_btn = QPushButton('Finish')
+        self.change_center_btn = QPushButton('Change center')
+        self.change_center_btn.setToolTip('Next click: Change rotational center')
+        self.zoom_tomo_btn = QPushButton('Zoom tomo')
         self.reset_sino_btn = QPushButton('Reset sino')
         self.reset_sino_btn.setToolTip('Reset sinogram view')
 
-        for btn in [self.prev_btn, self.next_btn, self.save_btn, 
-                    self.load_btn, self.done_btn, self.reset_sino_btn]:
+        for btn in [self.prev_btn, self.next_btn, self.save_btn, self.load_btn, 
+                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn,
+                    self.reset_sino_btn]:
             btn.setFont(self.FONT_CTRL)
 
         self.prev_btn.clicked.connect(self.prev_image)
@@ -117,6 +123,8 @@ class AlignViewer(QDialog):
         self.save_btn.clicked.connect(self.save_shifts)
         self.load_btn.clicked.connect(self.load_shifts)
         self.done_btn.clicked.connect(self.finish)
+        self.change_center_btn.clicked.connect(self.start_change_center)
+        self.zoom_tomo_btn.clicked.connect(self.toggle_zoom_tomo)
         self.reset_sino_btn.clicked.connect(self.reset_sino_view)
 
     def _init_slider(self):
@@ -130,6 +138,8 @@ class AlignViewer(QDialog):
     def _setup_layout(self):
         # zoom buttons
         zoom_hbox = QHBoxLayout()
+        zoom_hbox.addWidget(self.change_center_btn)
+        zoom_hbox.addWidget(self.zoom_tomo_btn)
         zoom_hbox.addStretch(1)
         zoom_hbox.addWidget(self.reset_sino_btn)
         zoom_hbox.addWidget(self.zoom_in_btn)
@@ -164,6 +174,19 @@ class AlignViewer(QDialog):
         layout.addWidget(self.slider)
         self.setLayout(layout)
 
+    def start_change_center(self):
+        self.changing_center = True
+
+    def toggle_zoom_tomo(self):
+        self.tomo_zoomed = not self.tomo_zoomed
+        self.update_tomo()
+
+    def reset_sino_view(self):
+        self.sino_crop = None
+        self.sino_selecting = False
+        self.sino_sel_start = None
+        self.update_sino()
+
     def zoom_in(self):
         if self.view_scale < self.max_scale:
             self.view_scale *= 1.25
@@ -179,6 +202,21 @@ class AlignViewer(QDialog):
         new_w = int(base_w * self.view_scale)
         new_h = int(base_h * self.view_scale)
         self.setFixedSize(new_w, new_h)
+
+        # distribute space of three labels
+        total_w = self.width() - 40  
+        total_h = self.height() - 180  
+        img_label_w = int(total_w * 0.5)
+        hs_label_w = int(total_w * 0.2) 
+        sino_label_w = total_w - img_label_w - hs_label_w
+        img_label_h = hs_label_h = sino_label_h = total_h
+        self.img_label.setFixedSize(img_label_w, img_label_h)
+        self.hs_label.setFixedSize(hs_label_w, hs_label_h)
+        self.sino_label.setFixedSize(sino_label_w, sino_label_h)
+        scale_w = img_label_w / self.raw_size
+        scale_h = img_label_h / self.raw_size
+        self.scale = min(scale_w, scale_h)
+
         self.update_all()
 
     def slider_changed(self, value):
@@ -200,8 +238,8 @@ class AlignViewer(QDialog):
         save_path = QFileDialog.getSaveFileName(self, "Save shifts", self.last_dir, "Text Files (*.txt)")[0]
         if save_path:
             with open(save_path, 'w') as f:
-                for i, (dx, dy) in enumerate(self.shifts):
-                    f.write(f"{str(i).zfill(3)},{dx},{dy}\n")
+                for i, (dy, dx) in enumerate(self.shifts):
+                    f.write(f"{str(i).zfill(3)},{dy},{dx}\n")
 
     def load_shifts(self):
         shifts_file, _ = QFileDialog.getOpenFileName(None, "Load Shifts", "*.txt")
@@ -211,23 +249,18 @@ class AlignViewer(QDialog):
                     parts = line.strip().split(',')
                     try:
                         idx, dy, dx = map(int, parts)
-                        if 0 <= idx < len(self.shifts):
-                            self.shifts[idx] = [dy, dx]  
-                            self.proj_images[idx] = np.roll(self.proj_images[idx], shift=(dy, dx), axis=(0, 1))
+                        self.shifts[idx] = [dy, dx]  
+                        self.proj_images[idx] = np.roll(self.proj_images[idx], shift=(dy, dx), axis=(0, 1))
                     except Exception:
                         continue
         self.update_all()
 
     def finish(self):
-        for i, img in enumerate(self.proj_images):
+        for i in range(self.n_proj):
+            img = self.tomo.get_image(i)
+            img = np.roll(img, shift=self.shifts[i], axis=(0, 1))
             self.tomo.set(i, img)
         super().accept()
-
-    def reset_sino_view(self):
-        self.sino_crop = None
-        self.sino_selecting = False
-        self.sino_sel_start = None
-        self.update_sino()
 
     def update_all(self):
         self.update_tomo()
@@ -294,14 +327,12 @@ class AlignViewer(QDialog):
         if key in key_map:
             axis, delta = key_map[key]
             self.shifts[self.index][axis] += delta
-            # 依照 axis 決定 dx, dy
-            dy = self.shifts[self.index][0] - self.shifts[self.index][0] + (delta if axis == 0 else 0)
-            dx = self.shifts[self.index][1] - self.shifts[self.index][1] + (delta if axis == 1 else 0)
             # 直接用 axis 判斷
             dy = delta if axis == 0 else 0
             dx = delta if axis == 1 else 0
             img_temp = self.proj_images[self.index]
             self.proj_images[self.index] = np.roll(img_temp, shift=(dy, dx), axis=(0, 1))
+            self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=dy)
             self.update_all()
 
     def mousePressEvent(self, event):
@@ -322,6 +353,17 @@ class AlignViewer(QDialog):
         # prevent out-of-bounds
         if img_x < 0 or img_x >= self.raw_size or img_y < 0 or img_y >= self.raw_size:
             return
+        
+        if self.tomo_zoomed:
+            img_x, img_y = img_x//2, img_y//2
+            img_x += self.tomo_vertex[0]
+            img_y += self.tomo_vertex[1]
+        
+        if self.changing_center:
+            self.rotational_center['y'] = img_y
+            self.changing_center = False
+            self.update_tomo()
+            return
 
         # click on green line
         if abs(img_y - self.line_y) < 5:
@@ -331,8 +373,9 @@ class AlignViewer(QDialog):
             dx = self.rotational_center['x'] - img_x
             dy = self.rotational_center['y'] - img_y
             self.shifts[self.index][0] += dy
-            self.shifts[self.index][1] += dx
+            self.shifts[self.index][1] += dx 
             self.proj_images[self.index] = np.roll(self.proj_images[self.index], shift=(dy, dx), axis=(0, 1))
+            self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=dy)
             self.update_all()
 
     def mouseMoveEvent(self, event):
@@ -351,48 +394,52 @@ class AlignViewer(QDialog):
     def update_tomo(self):
         size = self.raw_size
         center_x, center_y = self.rotational_center['x'], self.rotational_center['y']
-        img_rgb = np.stack([self.proj_images[self.index]]*3, axis=-1)
-        pil_img = Image.fromarray(img_rgb)
-        draw = ImageDraw.Draw(pil_img)
+
+        if self.tomo_zoomed:
+            # crop around rotational center
+            crop_size = size // 2
+            x0 = center_x - crop_size // 2
+            x1 = x0 + crop_size
+            y0 = max(center_y - crop_size // 2, 0) 
+            y1 = min(y0 + crop_size, size)
+            if y1 - y0 < crop_size:
+                y0 = y1 - crop_size
+            self.tomo_vertex = (x0, y0)
+            size = crop_size
+
+        base_img = self.proj_images[self.index]
+        base_img = Image.fromarray(base_img).convert("RGBA")
+        overlay = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay, "RGBA")
         
-        # support green line
+        # support line
         line_scale = 512 // size
-        draw.line([(0, self.line_y), (pil_img.width, self.line_y)], fill=(0, 255, 0), width=1)
+        draw.line([(0, self.line_y), (base_img.width, self.line_y)], fill=self.line_color, width=1)
         # crosshair at rotational center
         r = 8 / line_scale
-        draw.line([(center_x - r, center_y), (center_x + r, center_y)], fill=(0, 255, 0), width=2//line_scale)
-        draw.line([(center_x, center_y - r), (center_x, center_y + r)], fill=(0, 255, 0), width=2//line_scale)
-        img_rgb = np.array(pil_img)
+        draw.line([(center_x - r, center_y), (center_x + r, center_y)], fill=self.line_color, width=2//line_scale)
+        draw.line([(center_x, center_y - r), (center_x, center_y + r)], fill=self.line_color, width=2//line_scale)
+        result_img = Image.alpha_composite(base_img, overlay)
+        img_rgb = np.array(result_img.convert("RGB"))
 
-        # distribute space of three labels
-        total_w = self.width() - 40  # 預留邊界
-        total_h = self.height() - 180  # 預留上方/下方空間
-        img_label_w = int(total_w * 0.5)
-        hs_label_w = int(total_w * 0.2) 
-        sino_label_w = total_w - img_label_w - hs_label_w
-        img_label_h = hs_label_h = sino_label_h = total_h
-        self.img_label.setFixedSize(img_label_w, img_label_h)
-        self.hs_label.setFixedSize(hs_label_w, hs_label_h)
-        self.sino_label.setFixedSize(sino_label_w, sino_label_h)
-        scale_w = img_label_w / size
-        scale_h = img_label_h / size
-        self.scale = min(scale_w, scale_h)
+        if self.tomo_zoomed:
+            img_rgb = img_rgb[y0:y1, x0:x1, :].copy()
 
+        # show image
+        label_w, label_h = self.img_label.width(), self.img_label.height()
         qimg = QImage(img_rgb.data, size, size, 3 * size, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg)
-        self.img_label.setPixmap(pixmap.scaled(img_label_w, img_label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.img_label.setPixmap(pixmap.scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-        self.update_sino()
-        self.setWindowTitle(f"Align Viewer {self.index + 1}/{len(self.proj_images)}")
+        self.setWindowTitle(f"Align Viewer {self.index + 1}/{self.n_proj}")
 
     def update_horizontal_sum(self):
-        tomo = np.array(self.proj_images)
-        hs = tomo.sum(axis=2).T  # shape: (H, n_projs)
-        hs_8bit = norm_to_8bit(hs)
+        hs_8bit = self.hs_array
         hs_8bit = Image.fromarray(hs_8bit).resize((self.n_proj, 512), Image.Resampling.LANCZOS)
-        hs_rgb = np.repeat(np.array(hs_8bit)[:, :, None], 3, axis=2)
-        h, w = hs_rgb.shape[:2]
-        qimg = QImage(hs_rgb.data, w, h, 3 * w, QImage.Format_RGB888)
+        hs_8bit = np.array(hs_8bit)
+        h, w = hs_8bit.shape
+        
+        qimg = QImage(hs_8bit.data, w, h, w, QImage.Format_Grayscale8)
         label_w, label_h = self.hs_label.width(), self.hs_label.height()
         pixmap = QPixmap.fromImage(qimg).scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.hs_label.setPixmap(pixmap)
@@ -405,20 +452,19 @@ class AlignViewer(QDialog):
             If provided, should be (x0, y0, x1, y1) to draw a rectangle on the sinogram preview.
         """
         row_index = int(self.line_y)
-        sino_full = np.stack([img[row_index, :] for img in self.proj_images], axis=1)  # (width, N_proj)
+        sino = self.proj_images[:, row_index, :].T  # shape: (width, N_proj)
 
         # crop window
-        y0, y1, x0, x1 = 0, sino_full.shape[0], 0, sino_full.shape[1]
+        y0, y1, x0, x1 = 0, sino.shape[0], 0, sino.shape[1]
         if self.sino_crop:
             y0, y1, x0, x1 = self.sino_crop
-            y0 = max(0, min(y0, sino_full.shape[0]-1))
-            y1 = max(y0+1, min(y1, sino_full.shape[0]))
-            x0 = max(0, min(x0, sino_full.shape[1]-1))
-            x1 = max(x0+1, min(x1, sino_full.shape[1]))
-        sino = sino_full[y0:y1, x0:x1]
+            y0 = max(0, min(y0, sino.shape[0]-1))
+            y1 = max(y0+1, min(y1, sino.shape[0]))
+            x0 = max(0, min(x0, sino.shape[1]-1))
+            x1 = max(x0+1, min(x1, sino.shape[1]))
+        sino = sino[y0:y1, x0:x1]
 
-        sino_8bit = norm_to_8bit(sino)
-        sino_rgb = np.repeat(sino_8bit[:, :, None], 3, axis=2)
+        sino_rgb = np.repeat(sino[:, :, None], 3, axis=2)
 
         # 單一向下箭頭，指示目前投影。
         arrow_x = self.index - x0

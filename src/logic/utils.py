@@ -1,29 +1,26 @@
 import numpy as np
 
 
-def norm_to_8bit(img: np.ndarray, clip_lower=0.1, clip_upper=0.1, clip_percent=None, inverse=False):
+def norm_to_8bit(img: np.ndarray, clip_lower=0.1, clip_upper=0.1, inverse=False):
     """
-    以百分位裁切方式將影像正規化為 8 位元。
+    clip the array by percentile and normalize to 8-bit.
 
-    Args:
-        img: 輸入影像陣列
-        clip_lower: 下限裁切百分比（最暗像素）
-        clip_upper: 上限裁切百分比（最亮像素）
-        clip_percent: 舊參數（僅裁切上限）
-        inverse: 是否反相
+    Parameters
+    ----------
+    img: input image array
+    clip_lower: lower clip percentile (darkest pixels)
+    clip_upper: upper clip percentile (brightest pixels)
+    clip_percent: old parameter (only clips upper limit)
+    inverse: whether to invert
 
-    Returns:
-        8 位元正規化影像
+    Returns
+    -------
+    8-bit normalized image
     """
-    # 相容舊參數：若提供 clip_percent，僅套用上限裁切。
-    if clip_percent is not None:
-        clip_upper = clip_percent
-        clip_lower = 0.0
-
     vmin = np.percentile(img, clip_lower)
     vmax = np.percentile(img, 100 - clip_upper)
 
-    # 避免除以零。
+    # Avoid division by zero.
     if vmax == vmin:
         vmax = vmin + 1e-7
 
@@ -35,6 +32,35 @@ def norm_to_8bit(img: np.ndarray, clip_lower=0.1, clip_upper=0.1, clip_percent=N
 
     img = (img * 255).astype(np.uint8)
     return img
+
+
+def norm_hs_to_8bit(hs: np.ndarray, clip_lower=0.1, clip_upper=0.1):
+    """
+    Normalize horizontal sum array to 8-bit.
+
+    Parameters
+    -----------
+    hs: horizontal sum array
+    clip_lower: lower clip percentile (darkest pixels)
+    clip_upper: upper clip percentile (brightest pixels)
+
+    Returns
+    -------
+    8-bit normalized horizontal sum array
+    """
+    hs = hs.astype(np.float32)
+    vmin = np.percentile(hs, clip_lower)
+    vmax = np.percentile(hs, 100 - clip_upper)
+
+    # Avoid division by zero.
+    if vmax == vmin:
+        vmax = vmin + 1e-7
+
+    for i in range(hs.shape[1]):
+        hs[:, i] = (hs[:, i] - vmin) / (vmax - vmin)
+        hs[:, i] = np.clip(hs[:, i], 0, 1)
+    hs = (hs * 255).astype(np.uint8)
+    return hs
 
 
 def split_mosaic(img: np.ndarray, rows: int, cols: int):

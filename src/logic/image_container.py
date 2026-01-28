@@ -18,11 +18,12 @@ class TXM_Images:
         angles : np.ndarray, optional
             Array of rotation angles for tomography images
         """
-        self.images = images  # shape: (N, H, W)
         self.original = images.copy()  # Keep a backup for restoring raw images
+        self.images = images  # shape: (N, H, W)
         self.mode = mode
         self.metadata = metadata or {}
         self.ref = None
+        self.shift_array = None
 
         if mode == 'tomo':
             if angles is None:
@@ -34,7 +35,7 @@ class TXM_Images:
         return self.images.shape[0]
 
     def get_image(self, idx):
-        return self.images[idx]
+        return self.images[idx].copy()
 
     def get_theta(self, idx):
         if self.mode == 'tomo':
@@ -44,11 +45,17 @@ class TXM_Images:
     def get_full_images(self):
         return self.images
     
+    def get_norm_images(self):
+        norm_images = np.zeros_like(self.images, dtype=np.uint8)
+        for i in range(self.images.shape[0]):
+            norm_images[i] = norm_to_8bit(self.images[i])
+        return norm_images
+    
     def get_mosaic(self):
         if self.mode == 'mosaic':
             rows, cols = self.metadata['mosaic_row'], self.metadata['mosaic_column']
             mosaic = mosaic_stitching(self.images, rows, cols)
-            mosaic = norm_to_8bit(mosaic, clip_percent=0.)
+            mosaic = norm_to_8bit(mosaic, clip_lower=0., clip_upper=0.)
             return mosaic
         return None
     
@@ -63,6 +70,17 @@ class TXM_Images:
         set the entire images array.
         """
         self.images = images
+
+    def set_shift_array(self, shift_array):
+        """
+        set the shift array for all images.
+
+        Parameters
+        ----------
+        shift_array : np.ndarray
+            Array of shape (N, 2) where each row is (y_shift, x_shift)
+        """
+        self.shift_arrays = shift_array
 
     def flip_vertical(self):
         self.images = np.flip(self.images, axis=1)
