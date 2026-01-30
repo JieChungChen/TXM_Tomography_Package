@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw
 from PyQt5.QtWidgets import (QLabel, QDialog, QPushButton, QVBoxLayout, QSizePolicy,
                              QHBoxLayout, QSlider, QFileDialog)
 from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtGui import QImage, QPixmap, QFont
+from PyQt5.QtGui import QImage, QPixmap, QFont, QPainter, QPen, QColor
 from src.logic.utils import norm_hs_to_8bit
 
 
@@ -37,14 +37,14 @@ class AlignViewer(QDialog):
         self.proj_images = self.tomo.get_norm_images()
         self.last_dir = last_dir
         self.n_proj, self.raw_size, _ = self.proj_images.shape
-        self.rotational_center = {'x': self.raw_size // 2, 'y': self.raw_size // 2}
+        self.rotational_center = (self.raw_size // 2, self.raw_size // 2)
 
         # GUI variables
         self.view_scale = 1.0
         self.max_scale = 3.0
         self.min_scale = 0.75
         self.index = self.n_proj // 2
-        self.line_color = (0, 255, 0, 128)
+        self.line_color = (0, 255, 0, 160)
         self.line_y = 100
         self.changing_center = False
         self.tomo_zoomed = False
@@ -52,40 +52,51 @@ class AlignViewer(QDialog):
         
         # tomography variables
         self.shifts = [[0, 0] for _ in range(self.n_proj)] # list of [y_shift, x_shift]
-        self.tomo_vertex = (0, 0)
+        self.tomo_zoomed_size = self.raw_size // 2
+        self.tomo_vertex = self._get_tomo_zoomed_vertex()
 
         # horizontal sum variables
-        self.hs_array = np.array(self.proj_images).sum(axis=2).T
-        self.hs_array = norm_hs_to_8bit(self.hs_array)
+        self.hs_array = self._get_hs_array()
 
         # sinogram variables
-        self.sino_array = None
-        self.sino_pixmap_size = (1, 1)
-        self.sino_pixmap_offset = (0, 0)
-        self.sino_crop = None
+        self.sino_crop = (0, self.raw_size, 0, self.n_proj)  # y0, y1, x0, x1
         self.sino_selecting = False
-        self.sino_sel_start = None
+        self.sino_arr_start = None
+        self.sino_pix_start = None
 
         # initialize GUI
         self._init_labels()
         self._init_buttons()
         self._init_slider()
         self._setup_layout()
+        self.img_label.installEventFilter(self)
         self.sino_label.installEventFilter(self)
         self.resize_view()
 
     def _init_labels(self):
+        label_style = """
+            QLabel {
+                border: 2px solid #bfc7d5;
+                border-radius: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 #f5f7fa, stop:1 #c3cfe2);
+                padding: 4px;
+            }
+        """
         self.img_label = QLabel("Tomography")
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.img_label.setStyleSheet(label_style)
 
         self.hs_label = QLabel("Horizontal Sum")
         self.hs_label.setAlignment(Qt.AlignCenter)
         self.hs_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.hs_label.setStyleSheet(label_style)
 
         self.sino_label = QLabel("Sinogram")
         self.sino_label.setAlignment(Qt.AlignCenter)
         self.sino_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.sino_label.setStyleSheet(label_style)
 
     def _init_buttons(self):
         # zoom in / out bottons
@@ -147,18 +158,31 @@ class AlignViewer(QDialog):
 
         # images (tomo & sino) with reset button under sino
         tomo_vbox = QVBoxLayout()
-        tomo_vbox.addWidget(self.img_label, 3)
+        tomo_title = QLabel("Tomography")
+        tomo_title.setFont(QFont('Calibri', 16, QFont.Bold))
+        tomo_title.setAlignment(Qt.AlignCenter)
+        tomo_vbox.addWidget(tomo_title)
+        tomo_vbox.addWidget(self.img_label)
 
         hs_vbox = QVBoxLayout()
+        hs_title = QLabel("Horizontal Sum")
+        hs_title.setFont(QFont('Calibri', 16, QFont.Bold))
+        hs_title.setAlignment(Qt.AlignCenter)
+        hs_vbox.addWidget(hs_title)
         hs_vbox.addWidget(self.hs_label)
 
         sino_vbox = QVBoxLayout()
+        sino_title = QLabel("Sinogram")
+        sino_title.setFont(QFont('Calibri', 16, QFont.Bold))
+        sino_title.setAlignment(Qt.AlignCenter)
+        sino_vbox.addWidget(sino_title)
         sino_vbox.addWidget(self.sino_label)
 
         top_hbox = QHBoxLayout()
-        top_hbox.addLayout(tomo_vbox, 3)
-        top_hbox.addLayout(hs_vbox, 2)
-        top_hbox.addLayout(sino_vbox, 2)
+        top_hbox.setSpacing(20)
+        top_hbox.addLayout(tomo_vbox)
+        top_hbox.addLayout(hs_vbox)
+        top_hbox.addLayout(sino_vbox)
 
         layout = QVBoxLayout()
         layout.addLayout(zoom_hbox)
@@ -180,20 +204,23 @@ class AlignViewer(QDialog):
     def toggle_zoom_tomo(self):
         self.tomo_zoomed = not self.tomo_zoomed
         self.update_tomo()
+        self.hs_array = self._get_hs_array()
+        self.update_hori_sum()
 
     def reset_sino_view(self):
-        self.sino_crop = None
+        self.sino_crop = (0, self.raw_size, 0, self.n_proj)
         self.sino_selecting = False
-        self.sino_sel_start = None
+        self.sino_arr_start = None
+        self.sino_pix_start = None
         self.update_sino()
 
     def zoom_in(self):
-        if self.view_scale < self.max_scale:
+        if (self.view_scale * 1.25) < self.max_scale:
             self.view_scale *= 1.25
             self.resize_view()
 
     def zoom_out(self):
-        if self.view_scale > self.min_scale:
+        if (self.view_scale / 1.25) > self.min_scale:
             self.view_scale /= 1.25
             self.resize_view()
 
@@ -207,10 +234,11 @@ class AlignViewer(QDialog):
         total_w = self.width() - 40  
         total_h = self.height() - 180  
         img_label_w = int(total_w * 0.5)
-        hs_label_w = int(total_w * 0.2) 
+        hs_label_w = int(total_w * 0.25) 
         sino_label_w = total_w - img_label_w - hs_label_w
         img_label_h = hs_label_h = sino_label_h = total_h
-        self.img_label.setFixedSize(img_label_w, img_label_h)
+        img_label_size = min(img_label_w, img_label_h)
+        self.img_label.setFixedSize(img_label_size, img_label_size)
         self.hs_label.setFixedSize(hs_label_w, hs_label_h)
         self.sino_label.setFixedSize(sino_label_w, sino_label_h)
         scale_w = img_label_w / self.raw_size
@@ -223,6 +251,7 @@ class AlignViewer(QDialog):
         self.index = value
         self.update_tomo()
         self.update_sino()
+        self.setWindowTitle(f"Align Viewer {self.index + 1}/{self.n_proj}")
 
     def prev_image(self):
         if self.index > 0:
@@ -265,58 +294,77 @@ class AlignViewer(QDialog):
     def update_all(self):
         self.update_tomo()
         self.update_sino()
-        self.update_horizontal_sum()
+        self.update_hori_sum()
 
     # -------------- core logic --------------- 
-    def get_sino_pos(self, pos):
+    def _get_tomo_zoomed_vertex(self):
+        center_x, center_y = self.rotational_center
+        x0 = center_x - self.tomo_zoomed_size // 2
+        y0 = max(center_y - self.tomo_zoomed_size // 2, 0) 
+        y1 = min(y0 + self.tomo_zoomed_size, self.raw_size)
+        if y1 - y0 < self.tomo_zoomed_size:
+            y0 = y1 - self.tomo_zoomed_size
+        return x0, y0
+
+    def _get_hs_array(self):
+        """
+        Get horizontal sum array, possibly cropped around vertex.
+
+        Returns
+        -------
+        hs_array : np.ndarray
+            The horizontal sum array in 8-bit format.
+        """
+        if not self.tomo_zoomed:
+            hs_array = self.proj_images.sum(axis=2)
+        else:
+            x0, y0 = self.tomo_vertex
+            crop_size = self.raw_size // 2
+            x1 = x0 + crop_size
+            y1 = y0 + crop_size
+            hs_array = self.proj_images[:, y0:y1, x0:x1].sum(axis=2)
+        return norm_hs_to_8bit(hs_array).T
+
+    def _get_sino_pos(self, event):
         """
         get the actual sino position when clicking on the sino image.
-        """
-        x = pos.x() - self.sino_pixmap_offset[0]
-        y = pos.y() - self.sino_pixmap_offset[1]
-        pm_w, pm_h = self.sino_pixmap_size
-        x = max(0, min(x, pm_w))
-        y = max(0, min(y, pm_h))
-        arr_h, arr_w = self.sino_array.shape[:2]
-        arr_x = int(x * arr_w / pm_w)
-        arr_y = int(y * arr_h / pm_h)
-        arr_x = max(0, min(arr_x, arr_w))
-        arr_y = max(0, min(arr_y, arr_h))
-        return arr_x, arr_y
 
-    def eventFilter(self, obj, event):
-        if obj is self.sino_label:
-            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                coord = self.get_sino_pos(event.pos())
-                if coord is not None:
-                    self.sino_selecting = True
-                    self.sino_sel_start = coord
-                    return True
-            elif event.type() == QEvent.MouseMove and self.sino_selecting:
-                coord = self.get_sino_pos(event.pos())
-                if coord is not None and self.sino_sel_start is not None:
-                    x0, y0 = self.sino_sel_start
-                    x1, y1 = coord
-                    self.update_sino(draw_rect=(min(x0, x1), min(y0, y1),
-                                                max(x0, x1), max(y0, y1)))
-                return True
-            elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-                if self.sino_selecting and self.sino_sel_start is not None:
-                    coord = self.get_sino_pos(event.pos())
-                    if coord is not None:
-                        x0, y0 = self.sino_sel_start
-                        x1, y1 = coord
-                        # Only set crop if dragged (start != end)
-                        if (x0, y0) != (x1, y1):
-                            self.sino_crop = (min(y0, y1), max(y0, y1),
-                                              min(x0, x1), max(x0, x1))
-                    self.update_sino()
-                self.sino_selecting = False
-                self.sino_sel_start = None
-                return True
-        return super().eventFilter(obj, event)
-    
+        Returns
+        -------
+        sino_x, sino_y : int
+            x and y coordinates in the sinogram array.
+        """
+        y0, y1, x0, x1 = self.sino_crop
+        click_x, click_y = event.x(), event.y()
+        pm_w, pm_h = self.sino_label.pixmap().width(), self.sino_label.pixmap().height()
+        click_x = max(0, min(click_x, pm_w))
+        click_y = max(0, min(click_y, pm_h))
+        sino_h, sino_w = y1 - y0, x1 - x0
+        sino_x = x0 + int(click_x * sino_w / pm_w)
+        sino_y = y0 + int(click_y * sino_h / pm_h)
+        return sino_x, sino_y
+
+    def _set_label_pixmap(self, label, img_array, keep_ratio=True):
+        h, w = img_array.shape[:2]
+        label_w, label_h = label.width(), label.height()
+        
+        if img_array.ndim == 2:
+            qimg = QImage(img_array.data, w, h, w, QImage.Format_Grayscale8)
+        else:
+            qimg = QImage(img_array.data, w, h, 3 * w, QImage.Format_RGB888)
+        
+        if keep_ratio:
+            pixmap = QPixmap.fromImage(qimg).scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            pixmap = QPixmap.fromImage(qimg).scaled(label_w, label_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        label.setPixmap(pixmap)
+
     def keyPressEvent(self, event):
+        """
+        Use WASD keys to shift the tomography image.
+        W/S: shift up/down
+        A/D: shift left/right
+        """
         key_map = {
             Qt.Key_W: (0, -1),
             Qt.Key_S: (0, 1),
@@ -327,86 +375,100 @@ class AlignViewer(QDialog):
         if key in key_map:
             axis, delta = key_map[key]
             self.shifts[self.index][axis] += delta
-            # 直接用 axis 判斷
-            dy = delta if axis == 0 else 0
-            dx = delta if axis == 1 else 0
             img_temp = self.proj_images[self.index]
-            self.proj_images[self.index] = np.roll(img_temp, shift=(dy, dx), axis=(0, 1))
-            self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=dy)
+            self.proj_images[self.index] = np.roll(img_temp, shift=delta, axis=axis)
+            if axis == 0:
+                self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=delta)
             self.update_all()
 
-    def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton or self.img_label.pixmap() is None:
-            return
-        
-        # mouse coordinates
-        mouse_x = event.x() - self.img_label.x()
-        mouse_y = event.y() - self.img_label.y()
-        pixmap = self.img_label.pixmap()
-        label_w, label_h = self.img_label.width(), self.img_label.height()
-        pm_w, pm_h = pixmap.width(), pixmap.height()
-        offset_x = max((label_w - pm_w) // 2, 0)
-        offset_y = max((label_h - pm_h) // 2, 0)
-        img_x = int((mouse_x - offset_x) / self.scale)
-        img_y = int((mouse_y - offset_y) / self.scale)
+    def eventFilter(self, obj, event):
+        # sinogram event filter
+        if obj is self.sino_label:
+            # start selecting
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                coord = self._get_sino_pos(event.pos())
+                self.sino_selecting = True
+                self.sino_arr_start = coord
+                self.sino_pix_start = event.pos().x(), event.pos().y()
+                return True
+            # moving mouse while selecting
+            elif event.type() == QEvent.MouseMove and self.sino_selecting:
+                coord = self._get_sino_pos(event.pos())
+                if self.sino_pix_start is not None:
+                    x0, y0 = self.sino_pix_start
+                    x1, y1 = event.pos().x(), event.pos().y()
+                    self.update_sino(draw_rect=(min(x0, x1), min(y0, y1),
+                                                max(x0, x1), max(y0, y1)))
+                return True
+            # finish selecting
+            elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                if self.sino_selecting and self.sino_pix_start is not None:
+                    coord = self._get_sino_pos(event.pos())
+                    x0, y0 = self.sino_arr_start
+                    x1, y1 = coord
+                    if (x0, y0) != (x1, y1):
+                        self.sino_crop = (min(y0, y1), max(y0, y1),
+                                            min(x0, x1), max(x0, x1))
+                    self.update_sino()
+                self.sino_selecting = False
+                self.sino_pix_start = None
+                return True
+            
+        # tomography event filter
+        if obj is self.img_label:
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                img_x = int(event.x() / self.scale)
+                img_y = int(event.y() / self.scale)
 
-        # prevent out-of-bounds
-        if img_x < 0 or img_x >= self.raw_size or img_y < 0 or img_y >= self.raw_size:
-            return
-        
-        if self.tomo_zoomed:
-            img_x, img_y = img_x//2, img_y//2
-            img_x += self.tomo_vertex[0]
-            img_y += self.tomo_vertex[1]
-        
-        if self.changing_center:
-            self.rotational_center['y'] = img_y
-            self.changing_center = False
-            self.update_tomo()
-            return
-
-        # click on green line
-        if abs(img_y - self.line_y) < 5:
-            self.dragging_line = True
-        # click on tomo image
-        else:
-            dx = self.rotational_center['x'] - img_x
-            dy = self.rotational_center['y'] - img_y
-            self.shifts[self.index][0] += dy
-            self.shifts[self.index][1] += dx 
-            self.proj_images[self.index] = np.roll(self.proj_images[self.index], shift=(dy, dx), axis=(0, 1))
-            self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=dy)
-            self.update_all()
-
-    def mouseMoveEvent(self, event):
-        if self.dragging_line:
-            mouse_y = event.pos().y() - self.img_label.pos().y()
-            img_y = int(mouse_y / self.scale)
-            img_y = max(0, min(img_y, self.raw_size - 1))
-            self.line_y = img_y
-            self.update_tomo()
-            self.update_sino()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dragging_line = False
+                # prevent out-of-bounds
+                if img_x < 0 or img_x >= self.raw_size or img_y < 0 or img_y >= self.raw_size:
+                    return True
+                # change the coordinates if zoomed
+                if self.tomo_zoomed:
+                    img_x, img_y = img_x//2, img_y//2
+                    img_x += self.tomo_vertex[0]
+                    img_y += self.tomo_vertex[1]
+                
+                if self.changing_center:
+                    self.rotational_center = (self.raw_size // 2, img_y)
+                    self.changing_center = False
+                    self.tomo_vertex = self._get_tomo_zoomed_vertex()
+                    self.update_tomo()
+                    return True
+                # click on green line
+                if abs(img_y - self.line_y) < 5:
+                    self.dragging_line = True
+                    return True
+                # click on tomo image
+                else:
+                    dx = self.rotational_center[0] - img_x
+                    dy = self.rotational_center[1] - img_y
+                    self.shifts[self.index][0] += dy
+                    self.shifts[self.index][1] += dx 
+                    self.proj_images[self.index] = np.roll(self.proj_images[self.index], shift=(dy, dx), axis=(0, 1))
+                    self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=dy)
+                    self.update_all()
+                    return True
+            # moving mouse while dragging line
+            elif event.type() == QEvent.MouseMove and self.dragging_line:
+                img_y = int(event.y() / self.scale)
+                img_y = max(0, min(img_y, self.raw_size - 1))
+                if self.tomo_zoomed:
+                    img_y = img_y//2 + self.tomo_vertex[1]
+                self.line_y = img_y
+                self.update_tomo()
+                self.update_sino()
+                return True
+            # finish dragging line
+            elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self.dragging_line = False
+                return True
+            
+        return super().eventFilter(obj, event)
 
     def update_tomo(self):
         size = self.raw_size
-        center_x, center_y = self.rotational_center['x'], self.rotational_center['y']
-
-        if self.tomo_zoomed:
-            # crop around rotational center
-            crop_size = size // 2
-            x0 = center_x - crop_size // 2
-            x1 = x0 + crop_size
-            y0 = max(center_y - crop_size // 2, 0) 
-            y1 = min(y0 + crop_size, size)
-            if y1 - y0 < crop_size:
-                y0 = y1 - crop_size
-            self.tomo_vertex = (x0, y0)
-            size = crop_size
-
+        center_x, center_y = self.rotational_center
         base_img = self.proj_images[self.index]
         base_img = Image.fromarray(base_img).convert("RGBA")
         overlay = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
@@ -416,33 +478,23 @@ class AlignViewer(QDialog):
         line_scale = 512 // size
         draw.line([(0, self.line_y), (base_img.width, self.line_y)], fill=self.line_color, width=1)
         # crosshair at rotational center
-        r = 8 / line_scale
+        r = 4 / line_scale
         draw.line([(center_x - r, center_y), (center_x + r, center_y)], fill=self.line_color, width=2//line_scale)
         draw.line([(center_x, center_y - r), (center_x, center_y + r)], fill=self.line_color, width=2//line_scale)
         result_img = Image.alpha_composite(base_img, overlay)
         img_rgb = np.array(result_img.convert("RGB"))
 
         if self.tomo_zoomed:
+            x0, y0 = self.tomo_vertex
+            x1 = x0 + self.tomo_zoomed_size
+            y1 = y0 + self.tomo_zoomed_size
             img_rgb = img_rgb[y0:y1, x0:x1, :].copy()
 
-        # show image
-        label_w, label_h = self.img_label.width(), self.img_label.height()
-        qimg = QImage(img_rgb.data, size, size, 3 * size, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qimg)
-        self.img_label.setPixmap(pixmap.scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self._set_label_pixmap(self.img_label, img_rgb, keep_ratio=True)
 
-        self.setWindowTitle(f"Align Viewer {self.index + 1}/{self.n_proj}")
-
-    def update_horizontal_sum(self):
-        hs_8bit = self.hs_array
-        hs_8bit = Image.fromarray(hs_8bit).resize((self.n_proj, 512), Image.Resampling.LANCZOS)
-        hs_8bit = np.array(hs_8bit)
-        h, w = hs_8bit.shape
-        
-        qimg = QImage(hs_8bit.data, w, h, w, QImage.Format_Grayscale8)
-        label_w, label_h = self.hs_label.width(), self.hs_label.height()
-        pixmap = QPixmap.fromImage(qimg).scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.hs_label.setPixmap(pixmap)
+    def update_hori_sum(self):
+        hs_8bit = self.hs_array.copy()
+        self._set_label_pixmap(self.hs_label, hs_8bit, keep_ratio=False)
 
     def update_sino(self, draw_rect=None):
         """
@@ -453,50 +505,35 @@ class AlignViewer(QDialog):
         """
         row_index = int(self.line_y)
         sino = self.proj_images[:, row_index, :].T  # shape: (width, N_proj)
-
-        # crop window
-        y0, y1, x0, x1 = 0, sino.shape[0], 0, sino.shape[1]
-        if self.sino_crop:
-            y0, y1, x0, x1 = self.sino_crop
-            y0 = max(0, min(y0, sino.shape[0]-1))
-            y1 = max(y0+1, min(y1, sino.shape[0]))
-            x0 = max(0, min(x0, sino.shape[1]-1))
-            x1 = max(x0+1, min(x1, sino.shape[1]))
+        # crop sinogram
+        y0, y1, x0, x1 = self.sino_crop
         sino = sino[y0:y1, x0:x1]
-
+        # show image
         sino_rgb = np.repeat(sino[:, :, None], 3, axis=2)
+        self._set_label_pixmap(self.sino_label, sino_rgb, keep_ratio=False)
 
-        # 單一向下箭頭，指示目前投影。
-        arrow_x = self.index - x0
+        # draw current index arrow
+        pixmap = self.sino_label.pixmap()
+        label_w, label_h = self.sino_label.width(), self.sino_label.height()
+        arrow_x = self.index - x0 
         if 0 <= arrow_x < sino_rgb.shape[1]:
-            tip_h = max(2, min(sino_rgb.shape[0], 8))
-            for dy in range(tip_h):
-                span = tip_h - dy
-                lx = arrow_x - span + 1
-                rx = arrow_x + span
-                lx = max(lx, 0)
-                rx = min(rx, sino_rgb.shape[1])
-                sino_rgb[dy, lx:rx, :] = [255, 0, 0]
+            painter = QPainter(pixmap)
+            pen = QPen(QColor(255, 0, 0, 128), 5)
+            painter.setPen(pen)
+            arrow_x_pixmap = int(arrow_x * label_w / sino_rgb.shape[1]) + 1 
+            segment_h = int(label_h * 0.05)
+            painter.drawLine(arrow_x_pixmap, 0, arrow_x_pixmap, segment_h)  
+            painter.drawLine(arrow_x_pixmap, label_h - segment_h, arrow_x_pixmap, label_h) 
+            painter.end()
 
-        # 若正在框選，畫出矩形預覽。
+        # draw selection rectangle
         if draw_rect is not None:
             rx0, ry0, rx1, ry1 = draw_rect
-            rx0 = max(0, min(rx0, sino_rgb.shape[1]-1))
-            rx1 = max(0, min(rx1, sino_rgb.shape[1]-1))
-            ry0 = max(0, min(ry0, sino_rgb.shape[0]-1))
-            ry1 = max(0, min(ry1, sino_rgb.shape[0]-1))
-            sino_rgb[ry0:ry1+1, [rx0, rx1], :] = [0, 255, 0]
-            sino_rgb[[ry0, ry1], rx0:rx1+1, :] = [0, 255, 0]
-
-        h, w = sino_rgb.shape[:2]
-        qimg = QImage(sino_rgb.data, w, h, 3 * w, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qimg)
-        # 紀錄尺寸與偏移，用於座標換算。
-        label_w, label_h = self.sino_label.width(), self.sino_label.height()
-        pm = pixmap.scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.sino_pixmap_size = (pm.width(), pm.height())
-        self.sino_pixmap_offset = (max((label_w - pm.width()) // 2, 0),
-                                   max((label_h - pm.height()) // 2, 0))
-        self.sino_array = sino_rgb
-        self.sino_label.setPixmap(pm)
-    
+            painter = QPainter(pixmap)
+            pen = QPen(QColor(0, 255, 0), 2)
+            painter.setPen(pen)
+            painter.drawLine(rx0, ry0, rx1, ry0)  
+            painter.drawLine(rx0, ry1, rx1, ry1)  
+            painter.drawLine(rx0, ry0, rx0, ry1)  
+            painter.drawLine(rx1, ry0, rx1, ry1) 
+            painter.end()

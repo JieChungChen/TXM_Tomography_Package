@@ -49,16 +49,12 @@ def norm_hs_to_8bit(hs: np.ndarray, clip_lower=0.1, clip_upper=0.1):
     8-bit normalized horizontal sum array
     """
     hs = hs.astype(np.float32)
-    vmin = np.percentile(hs, clip_lower)
-    vmax = np.percentile(hs, 100 - clip_upper)
-
-    # Avoid division by zero.
-    if vmax == vmin:
-        vmax = vmin + 1e-7
-
-    for i in range(hs.shape[1]):
-        hs[:, i] = (hs[:, i] - vmin) / (vmax - vmin)
-        hs[:, i] = np.clip(hs[:, i], 0, 1)
+    
+    for i in range(hs.shape[0]):
+        vmin = np.percentile(hs[i], clip_lower)
+        vmax = np.percentile(hs[i], 100 - clip_upper)
+        hs[i, :] = (hs[i, :] - vmin) / (vmax - vmin)
+        hs[i, :] = np.clip(hs[i, :], 0, 1)
     hs = (hs * 255).astype(np.uint8)
     return hs
 
