@@ -10,6 +10,13 @@ class AppContext:
         self.images = None
         self.mode = None
 
+        try:
+            import torch
+            from src.gui import AIRefRemoverDialog
+            self.ai_available = True
+        except ImportError:
+            self.ai_available = False
+
     def set_from_file(self, filepath, mode):
         self.sample_name = os.path.splitext(os.path.basename(filepath))[0]
         self.last_load_dir = os.path.dirname(filepath)

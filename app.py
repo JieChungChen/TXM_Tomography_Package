@@ -4,7 +4,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
 from PyQt5.QtWidgets import QProgressDialog, QApplication, QMainWindow, QFileDialog, QMessageBox, QDialog
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
-from src.gui import (AlignViewer, AIRefRemoverDialog, ContrastDialog, FBPViewer, 
+from src.gui import (AlignViewer, ContrastDialog, FBPViewer, 
                      FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, 
                      ReferenceModeDialog, SplitSliderDialog, resolve_duplicates)
 from src.gui.main_window import Ui_TXM_ToolBox
@@ -200,7 +200,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_alignment.setEnabled(self.context.mode == 'tomo')
         self.ui.action_reconstruction.setEnabled(self.context.mode == 'tomo')
         self.ui.action_full_view.setEnabled(self.context.mode == 'mosaic')
-        self.ui.actionAI_Reference.setEnabled(True)
+        self.ui.actionAI_Reference.setEnabled(self.context.ai_available)
 
         self.ui.imageSlider.setMinimum(0)
         self.ui.imageSlider.setMaximum(len(self.context.images) - 1)
@@ -283,17 +283,18 @@ class TXM_ToolBox(QMainWindow):
 
     @handle_errors(title="AI Reference Remover Error")
     def ref_ai_remover(self, *args):
-        if self.context.images is None:
-            QMessageBox.warning(self, "No Images", "Please load images first.")
+        if not self.context.ai_available:
+            QMessageBox.warning(self, "AI Not Available", "PyTorch is not installed.")
             return
-
-        # Run AI background removal
-        dialog = AIRefRemoverDialog(self.context.images, self)
-        if dialog.exec_() == QDialog.Accepted:
-            # Update images with processed ones
-            self.context.images.set_full_images(dialog.processed_images)
-            self.update_env()
-            self.show_info_message("AI Background Removal", f"Completed!")
+        else:
+            # Run AI background removal
+            from src.gui import AIRefRemoverDialog
+            dialog = AIRefRemoverDialog(self.context.images, self)
+            if dialog.exec_() == QDialog.Accepted:
+                # Update images with processed ones
+                self.context.images.set_full_images(dialog.processed_images)
+                self.update_env()
+                self.show_info_message("AI Background Removal", f"Completed!")
 
     @handle_errors(title="Save Image Error")
     def save_image_as_tif(self, save_mode):
