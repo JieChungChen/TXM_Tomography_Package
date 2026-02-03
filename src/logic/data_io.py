@@ -161,7 +161,7 @@ def load_ref(filename):
         ref_img, _, _ = read_txm_raw(filename, 'single')
         ref_img = ref_img.squeeze()
     else:
-        ref_img = Image.open(filename)
+        ref_img = np.array(Image.open(filename))
     return ref_img
 
 
