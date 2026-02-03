@@ -12,7 +12,6 @@ class AppContext:
 
         try:
             import torch
-            from src.gui import AIRefRemoverDialog
             self.ai_available = True
         except ImportError:
             self.ai_available = False

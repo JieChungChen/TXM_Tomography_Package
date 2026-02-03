@@ -4,12 +4,12 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
 from PyQt5.QtWidgets import QProgressDialog, QApplication, QMainWindow, QFileDialog, QMessageBox, QDialog
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
-from src.gui import (AlignViewer, ContrastDialog, FBPViewer, 
+from src.gui import (AlignViewer, ContrastDialog, FBPViewer, MLEMSettingsDialog,
                      FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, 
                      ReferenceModeDialog, SplitSliderDialog, resolve_duplicates)
 from src.gui.main_window import Ui_TXM_ToolBox
-from src.logic import (AppContext, TXM_Images, FBPWorker, data_io, norm_to_8bit, 
-                       find_duplicate_angles, angle_sort, handle_errors)
+from src.logic import (AppContext, TXM_Images, FBPWorker, MLEMWorker, data_io, 
+                       norm_to_8bit, find_duplicate_angles, angle_sort, handle_errors)
 
 
 class TXM_ToolBox(QMainWindow):
@@ -45,6 +45,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_adjust_contrast.triggered.connect(self.open_contrast_dialog)
         self.ui.action_alignment.triggered.connect(self.open_align_viewer)
         self.ui.action_reconstruction.triggered.connect(self.get_fbp_result)
+        self.ui.action_ML_EM.triggered.connect(self.get_mlem_result)
         self.ui.action_full_view.triggered.connect(self.mosaic_stitching)
 
         self.ui.actionAI_Reference.triggered.connect(self.ref_ai_remover)
@@ -190,7 +191,7 @@ class TXM_ToolBox(QMainWindow):
             self.setWindowTitle(f"{self.context.sample_name}")
 
     def update_env(self):
-        """載入影像後更新介面狀態。"""
+        """update UI and environment after loading images."""
         self.ui.action_reference.setEnabled(True)
         self.ui.action_save_raw.setEnabled(True)
         self.ui.action_save_norm.setEnabled(True)
@@ -199,6 +200,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_adjust_contrast.setEnabled(True)
         self.ui.action_alignment.setEnabled(self.context.mode == 'tomo')
         self.ui.action_reconstruction.setEnabled(self.context.mode == 'tomo')
+        self.ui.action_ML_EM.setEnabled(self.context.mode == 'tomo')
         self.ui.action_full_view.setEnabled(self.context.mode == 'mosaic')
         self.ui.actionAI_Reference.setEnabled(self.context.ai_available)
 
@@ -242,9 +244,9 @@ class TXM_ToolBox(QMainWindow):
 
     @handle_errors(title="Reconstruction Error")
     def get_fbp_result(self, *args):
-        """在背景執行緒啟動 FBP 重建。"""
+        """在背景執行緒啟動 FBP 重建，並顯示進度對話框"""
         img_array = self.context.get_images()
-        original_size = (img_array.shape[1], img_array.shape[2])  # （高度、寬度）
+        original_size = self.context.get_image_size()  # （高度、寬度）
 
         # 顯示解析度選擇對話框。
         resolution_dialog = FBPResolutionDialog(original_size, self)
@@ -274,6 +276,41 @@ class TXM_ToolBox(QMainWindow):
         self.worker.finished.connect(lambda recon: (self.progress_dialog.close(), FBPViewer(recon, self).exec_()))
         self.worker.start()
 
+    @handle_errors(title="ML-EM Reconstruction Error")
+    def get_mlem_result(self, *args):
+        """在背景執行緒啟動 ML-EM 重建，並顯示進度對話框"""
+        img_array = self.context.get_images()
+        size = self.context.get_image_size()[0]
+
+        mlem_dialog = MLEMSettingsDialog(self, size)
+        if mlem_dialog.exec_() != QDialog.Accepted:
+            return 
+        
+        settings = mlem_dialog.get_settings()
+        iter_count = settings["iter_count"]
+        mask_ratio = settings["mask_ratio"]
+        start_layer = settings["start_layer"]
+        end_layer = settings["end_layer"]
+        angle_interval = settings["angle_interval"]
+
+        self.worker = MLEMWorker(img_array, iter_count, mask_ratio, start_layer, end_layer, angle_interval)
+        # 顯示進度對話框
+        self.progress_dialog = QProgressDialog(
+            "Reconstructing...", None, 0, 100, self
+        )
+        self.progress_dialog.setWindowTitle("MLEM Reconstruction")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setFixedSize(350, 100)
+        self.progress_dialog.canceled.connect(self.worker.cancel) 
+        self.progress_dialog.show()
+
+        self.worker.progress.connect(lambda p, r: (
+            self.progress_dialog.setValue(p), 
+            self.progress_dialog.setLabelText(f"<span style='font-family: Calibri; font-size:15px; font-weight:bold;'>{r}</span>" )
+        ) if not self.progress_dialog.wasCanceled() else None)
+        self.worker.finished.connect(lambda recon: (self.progress_dialog.close(), FBPViewer(recon, self).exec_()))
+        self.worker.start()
+
     @handle_errors(title="Mosaic Stitching Error")
     def mosaic_stitching(self, *args):
         mosaic = self.context.images.get_mosaic()
@@ -283,15 +320,14 @@ class TXM_ToolBox(QMainWindow):
 
     @handle_errors(title="AI Reference Remover Error")
     def ref_ai_remover(self, *args):
+        """使用去背景 Diffusion Model 處理原始影像"""
         if not self.context.ai_available:
             QMessageBox.warning(self, "AI Not Available", "PyTorch is not installed.")
             return
         else:
-            # Run AI background removal
             from src.gui import AIRefRemoverDialog
             dialog = AIRefRemoverDialog(self.context.images, self)
             if dialog.exec_() == QDialog.Accepted:
-                # Update images with processed ones
                 self.context.images.set_full_images(dialog.processed_images)
                 self.update_env()
                 self.show_info_message("AI Background Removal", f"Completed!")
