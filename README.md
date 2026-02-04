@@ -65,6 +65,9 @@ This GUI focuses on background correction using DDPM (Denoising Diffusion Probab
    pip install -r requirement.txt
    ```
 
+4. Download pre-trained models for AI background correction:  
+  [OneDrive Link](https://nsrrcmail-my.sharepoint.com/:f:/g/personal/chen_jc_nsrrc_org_tw/IgB7usYZ2jylSpkhUTP-UG6aAZiWJLVYOUwR-umvreAxVEU?e=KmsNVi)  
+  put the downloaded `checkpoints` folder into `ref_remover` directory.
 
 
 ## Usage
