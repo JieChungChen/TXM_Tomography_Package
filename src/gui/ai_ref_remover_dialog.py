@@ -1,19 +1,17 @@
 import os
-import sys
 import yaml
 import time
 import torch
 import torch.nn.functional as F
 import numpy as np
+from PIL import Image
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QProgressBar, QMessageBox,
-    QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollBar
+    QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollBar,
+    QSpinBox, QCheckBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QPixmap, QImage
-
-# Import from ref_remover_ddpm
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../ref_remover_ddpm'))
 from ref_remover import Diffusion_UNet, DDIM_Sampler
 from src.logic.utils import norm_to_8bit
 
@@ -21,14 +19,16 @@ from src.logic.utils import norm_to_8bit
 class AIRefRemoverThread(QThread):
     progress_updated = pyqtSignal(int, int, float)
     image_ready = pyqtSignal(object)
-    finished_signal = pyqtSignal(list)  # list of processed images
+    finished_signal = pyqtSignal(list) 
     failed = pyqtSignal(str)
 
-    def __init__(self, txm_images, configs, model_ckpt, device="cuda:0"):
+    def __init__(self, txm_images, configs, model_ckpt, pair_interval=1, save_ref_images=True, device="cuda:0"):
         super().__init__()
         self.txm_images = txm_images
         self.configs = configs
         self.model_ckpt = model_ckpt
+        self.pair_interval = pair_interval
+        self.save_ref_images = save_ref_images
         self.device = device
 
     def run(self):
@@ -48,11 +48,10 @@ class AIRefRemoverThread(QThread):
             model.eval()
             sampler = DDIM_Sampler(model, configs['ddpm_settings'], ddim_sampling_steps=50).to(self.device)
 
-            glob_max = np.max(raw_images)
             processed_images = []
 
             start_time = time.time()
-            n_steps = len(raw_images) - 1
+            n_steps = len(raw_images)
             self.progress_updated.emit(0, n_steps, 0.0)
 
             with torch.no_grad():
@@ -60,9 +59,13 @@ class AIRefRemoverThread(QThread):
                     if self.isInterruptionRequested():
                         break
 
-                    max_g = np.max(raw_images[i:i + 2])
+                    j = i + self.pair_interval
+                    if j >= len(raw_images):
+                        j = i - self.pair_interval
+
+                    max_g = np.max(raw_images[[i, j]])
                     input_1 = torch.tensor(raw_images[i] / max_g).unsqueeze(0).float().to(self.device)
-                    input_2 = torch.tensor(raw_images[i + 1] / max_g).unsqueeze(0).float().to(self.device)
+                    input_2 = torch.tensor(raw_images[j] / max_g).unsqueeze(0).float().to(self.device)
 
                     if input_1.shape[1] != 256:
                         input_1 = F.interpolate(input_1.unsqueeze(0), size=(256, 256), mode='bicubic').squeeze(0)
@@ -75,17 +78,20 @@ class AIRefRemoverThread(QThread):
                     pred = sampler(input_imgs.unsqueeze(0), noise).squeeze().cpu().numpy()
                     pred = pred / pred.mean()
 
-                    obj_pred_1 = input_1.squeeze().cpu().numpy() / pred * max_g
-                    obj_pred_2 = input_2.squeeze().cpu().numpy() / pred * max_g
+                    # save ref images as tif file for every 5th step
+                    if self.save_ref_images and i % 5 == 0:
+                        os.makedirs("ai_generated_refs", exist_ok=True)
+                        pred_img = (pred / pred.max() * 255).astype(np.uint8)
+                        im = Image.fromarray(pred_img)
+                        im.save(f"ai_generated_refs/ref_{i:04d}.tif")
+
+                    if raw_images[i].shape != pred.shape:
+                        pred = Image.fromarray(pred).resize(raw_images[i].shape, Image.BICUBIC)
+                    obj_pred_1 = raw_images[i] / pred
 
                     # Process first image
                     processed_images.append(obj_pred_1)
                     self.image_ready.emit(obj_pred_1)
-
-                    # Process second image if last pair
-                    if i == (len(raw_images) - 2):
-                        processed_images.append(obj_pred_2)
-                        self.image_ready.emit(obj_pred_2)
 
                     elapsed = time.time() - start_time
                     self.progress_updated.emit(i+1, n_steps, elapsed)
@@ -97,6 +103,7 @@ class AIRefRemoverThread(QThread):
 
         except Exception as e:
             self.failed.emit(str(e))
+
 
 class AIRefRemoverDialog(QDialog):
     def __init__(self, txm_images, parent=None):
@@ -141,6 +148,28 @@ class AIRefRemoverDialog(QDialog):
         # Path inputs
         self.config_input = self.create_path_input("模型設定檔:", "ref_remover/configs/BGC_v1_inference.yml", filter="*.yml")
         self.ckpt_input = self.create_path_input("模型權重:", "ref_remover/checkpoints/ddpm_pair_ft_10K.pt", filter="*.pt")
+
+        # Pair interval input
+        pair_layout = QHBoxLayout()
+        pair_label = QLabel("Pair interval:")
+        pair_label.setFont(QFont("Calibri", 14))
+        self.pair_interval_spinbox = QSpinBox()
+        self.pair_interval_spinbox.setFont(QFont("Calibri", 14))
+        self.pair_interval_spinbox.setMinimum(1)
+        self.pair_interval_spinbox.setMaximum(10)
+        self.pair_interval_spinbox.setValue(1)
+        pair_layout.addWidget(pair_label)
+        pair_layout.addWidget(self.pair_interval_spinbox)
+
+        # Save Ref Images checkbox
+        self.save_ref_checkbox = QCheckBox("Save Ref Images")
+        self.save_ref_checkbox.setFont(QFont("Calibri", 14))
+        self.save_ref_checkbox.setChecked(True)  # Default to checked
+        pair_layout.addStretch(1)
+        pair_layout.addWidget(self.save_ref_checkbox)
+
+        pair_layout.addStretch(1)
+        layout.addLayout(pair_layout)
 
         # Run button
         self.run_button = QPushButton("Run Inference")
@@ -262,7 +291,9 @@ class AIRefRemoverDialog(QDialog):
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
 
-        self.thread = AIRefRemoverThread(self.txm_images, configs, model_ckpt)
+        pair_interval = self.pair_interval_spinbox.value()
+        save_ref_images = self.save_ref_checkbox.isChecked()
+        self.thread = AIRefRemoverThread(self.txm_images, configs, model_ckpt, pair_interval=pair_interval, save_ref_images=save_ref_images)
         self.thread.progress_updated.connect(self.update_progress)
         self.thread.finished_signal.connect(self.on_finished)
         self.thread.failed.connect(self.on_failed)
