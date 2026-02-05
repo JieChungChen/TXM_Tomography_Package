@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QSpinBox, QDoubleSpinBox,
-                              QDialogButtonBox, QGroupBox, QHBoxLayout)
+                              QDialogButtonBox, QGroupBox, QHBoxLayout, QCheckBox)
 from PyQt5.QtGui import QFont
 
 
@@ -28,8 +28,8 @@ class MLEMSettingsDialog(QDialog):
         self.iter_count = 100
         self.mask_ratio = 0.95
         self.image_size = size
-        self.start_layer = 200
-        self.end_layer = 300
+        self.start_layer = 0
+        self.end_layer = 100
 
         # 檢查 torch 和 astra 是否可用
         self.torch_available = self.check_torch()
@@ -40,9 +40,18 @@ class MLEMSettingsDialog(QDialog):
         layout.setSpacing(15)
 
         # 顯示 Image Size
+        info_layout = QHBoxLayout()
         size_label = QLabel(f"<b>Original Image Size:</b> {self.image_size}×{self.image_size}")
         size_label.setStyleSheet("font-family: Calibri; font-size: 14pt; padding: 8px;")
-        layout.addWidget(size_label)
+        info_layout.addWidget(size_label)
+
+        self.inverse_checkbox = QCheckBox("Inverse")
+        self.inverse_checkbox.setStyleSheet("font-family: Calibri; font-size: 14pt; padding: 8px;")
+        self.inverse_checkbox.setChecked(True) 
+        info_layout.addWidget(self.inverse_checkbox)
+        info_layout.addStretch() 
+
+        layout.addLayout(info_layout)
 
         # 顯示 torch 和 astra 狀態
         status_group = QGroupBox("Library Status")
@@ -72,7 +81,7 @@ class MLEMSettingsDialog(QDialog):
         iter_label.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: normal;")
         self.iter_spinbox = QSpinBox()
         self.iter_spinbox.setMinimum(1)
-        self.iter_spinbox.setMaximum(1000)
+        self.iter_spinbox.setMaximum(500)
         self.iter_spinbox.setValue(self.iter_count)
         self.iter_spinbox.setStyleSheet("font-family: Calibri; font-size: 14pt;")
         iter_layout.addWidget(iter_label)
@@ -124,14 +133,14 @@ class MLEMSettingsDialog(QDialog):
         start_label.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: normal;")
         self.start_spinbox = QSpinBox()
         self.start_spinbox.setMinimum(0)
-        self.start_spinbox.setMaximum(512)
+        self.start_spinbox.setMaximum(size-1)
         self.start_spinbox.setValue(self.start_layer)
         self.start_spinbox.setStyleSheet("font-family: Calibri; font-size: 14pt;")
         end_label = QLabel("End layer:")
         end_label.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: normal;")
         self.end_spinbox = QSpinBox()
         self.end_spinbox.setMinimum(0)
-        self.end_spinbox.setMaximum(512)
+        self.end_spinbox.setMaximum(size-1)
         self.end_spinbox.setValue(self.end_layer)
         self.end_spinbox.setStyleSheet("font-family: Calibri; font-size: 14pt;")
         layer_layout.addWidget(start_label)
@@ -171,5 +180,6 @@ class MLEMSettingsDialog(QDialog):
             "mask_ratio": self.mask_spinbox.value(),
             "start_layer": self.start_spinbox.value(),
             "end_layer": self.end_spinbox.value(),
-            "angle_interval": self.angle_spinbox.value()
+            "angle_interval": self.angle_spinbox.value(),
+            "inverse": self.inverse_checkbox.isChecked()
         }

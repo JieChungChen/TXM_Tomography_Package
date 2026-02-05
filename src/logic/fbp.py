@@ -7,18 +7,22 @@ from PyQt5.QtCore import QThread, pyqtSignal
 class FBPWorker(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(np.ndarray)
-    def __init__(self, images, angles, target_size, angle_interval=1.0, astra_available=False):
+    def __init__(self, images, angles, target_size, angle_interval=1.0, astra_available=False, inverse=True):
         """
         FBP worker thread for reconstruction.
-        Args:
-            images: 輸入投影影像 (N, H, W)
-            angles: 每個投影的旋轉角度 (可為 None)
-            target_size: 重建目標解析度 (int)
-            angle_interval: 角度間隔 (度，預設 1.0)
-            astra_available: 是否可使用 ASTRA GPU 加速 (bool)
+        
+        Parameters
+        ----------
+        images: projection images (N, H, W)
+        angles: rotation angles for each projection (can be None)
+        target_size: target reconstruction resolution (int)
+        angle_interval: angle interval (degrees, default 1.0)
+        astra_available: whether ASTRA GPU acceleration is available (bool)
+        inverse: whether to perform inverse FBP (bool, default True)
         """
         super().__init__()
         self.is_cancelled = False
+        self.inverse = inverse
         self.angle_interval = angle_interval
         self.astra_available = astra_available
 
@@ -29,16 +33,16 @@ class FBPWorker(QThread):
             except ImportError:
                 self.astra_available = False
 
-        # 依影像數量與角度間隔建立角度序列。
+        # Create angle sequence based on the number of images and angle interval.
         n_images = len(images)
         if angles is None or len(angles) == 0:
-            # 依間隔建立角度，假設掃描範圍為 -90 到 +90。
+            # Create angles based on interval, assuming scan range from -90 to +90.
             self.angles = np.arange(n_images) * angle_interval - 90.0
         else:
-            # 使用提供的角度，但依影像數量與間隔重建角度序列。
+            # Use provided angles, but reconstruct angle sequence based on number of images and interval.
             self.angles = np.arange(n_images) * angle_interval + angles[0]
 
-        # 若指定目標解析度則縮放影像。
+        # If target resolution is specified, resize images.
         self.images = []
         for i in range(len(images)):
             img_temp = Image.fromarray(images[i])
@@ -111,6 +115,8 @@ class FBPWorker(QThread):
         if not self.is_cancelled:
             recon -= recon.min()
             recon /= recon.max()
+            if self.inverse:
+                recon = 1 - recon
             recon = (recon * 255).astype(np.uint8)
             self.finished.emit(recon)
 

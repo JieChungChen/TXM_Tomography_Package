@@ -9,7 +9,8 @@ class MLEMWorker(QThread):
     progress = pyqtSignal(int, str)  # 發送進度百分比和剩餘時間
     finished = pyqtSignal(np.ndarray)  # 發送完成的重建結果
 
-    def __init__(self, images, iter_count, mask_ratio, start_layer, end_layer, angle_interval=1.0):
+    def __init__(self, images, iter_count, mask_ratio, start_layer, end_layer, 
+                 angle_interval=1.0, inverse=True):
         """
         ML-EM reconstruction worker thread.
 
@@ -35,6 +36,7 @@ class MLEMWorker(QThread):
         self.start_layer = start_layer
         self.end_layer = end_layer
         self.angle_interval = angle_interval
+        self.inverse = inverse
         self.is_cancelled = False
 
     def cancel(self):
@@ -77,5 +79,7 @@ class MLEMWorker(QThread):
             # Normalize the reconstruction result
             recon -= recon.min()
             recon /= recon.max()
+            if self.inverse:
+                recon = 1.0 - recon
             recon = (recon * 255).astype(np.uint8)
             self.finished.emit(recon)

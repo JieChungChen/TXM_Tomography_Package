@@ -249,8 +249,7 @@ class AlignViewer(QDialog):
 
     def slider_changed(self, value):
         self.index = value
-        self.update_tomo()
-        self.update_sino()
+        self.update_all()
         self.setWindowTitle(f"Align Viewer {self.index + 1}/{self.n_proj}")
 
     def prev_image(self):
@@ -345,13 +344,15 @@ class AlignViewer(QDialog):
         return sino_x, sino_y
 
     def _set_label_pixmap(self, label, img_array, keep_ratio=True):
+        img_array = np.ascontiguousarray(img_array)
         h, w = img_array.shape[:2]
-        label_w, label_h = label.width(), label.height()
+        rect = label.contentsRect()
+        label_w, label_h = rect.width(), rect.height()
         
         if img_array.ndim == 2:
             qimg = QImage(img_array.data, w, h, w, QImage.Format_Grayscale8)
         else:
-            qimg = QImage(img_array.data, w, h, 3 * w, QImage.Format_RGB888)
+            qimg = QImage(img_array.data, w, h, w*3, QImage.Format_RGB888)
         
         if keep_ratio:
             pixmap = QPixmap.fromImage(qimg).scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -416,7 +417,7 @@ class AlignViewer(QDialog):
             
         # tomography event filter
         if obj is self.img_label:
-            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
                 img_x = int(event.x() / self.scale)
                 img_y = int(event.y() / self.scale)
 
@@ -496,6 +497,21 @@ class AlignViewer(QDialog):
         hs_8bit = self.hs_array.copy()
         self._set_label_pixmap(self.hs_label, hs_8bit, keep_ratio=False)
 
+        # draw current index arrow
+        pixmap = self.hs_label.pixmap()
+        rect = self.hs_label.contentsRect()
+        label_w, label_h = rect.width(), rect.height()
+        arrow_x = self.index 
+        if 0 <= arrow_x < hs_8bit.shape[1]:
+            painter = QPainter(pixmap)
+            pen = QPen(QColor(255, 0, 0, 128), 5)
+            painter.setPen(pen)
+            arrow_x_pixmap = int(arrow_x * label_w / hs_8bit.shape[1]) + 1 
+            segment_h = int(label_h * 0.05)
+            painter.drawLine(arrow_x_pixmap, 0, arrow_x_pixmap, segment_h)  
+            painter.drawLine(arrow_x_pixmap, label_h - segment_h, arrow_x_pixmap, label_h) 
+            painter.end()
+
     def update_sino(self, draw_rect=None):
         """
         Parameters
@@ -514,7 +530,8 @@ class AlignViewer(QDialog):
 
         # draw current index arrow
         pixmap = self.sino_label.pixmap()
-        label_w, label_h = self.sino_label.width(), self.sino_label.height()
+        rect = self.sino_label.contentsRect()
+        label_w, label_h = rect.width(), rect.height()
         arrow_x = self.index - x0 
         if 0 <= arrow_x < sino_rgb.shape[1]:
             painter = QPainter(pixmap)

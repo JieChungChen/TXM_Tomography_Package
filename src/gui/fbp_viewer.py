@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QSlider, QSizePolicy,
                               QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout,
-                              QSpinBox, QPushButton, QFileDialog, QMessageBox)
+                              QSpinBox, QPushButton, QFileDialog, QMessageBox, QCheckBox)
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtCore import Qt
 from PIL import Image
@@ -42,9 +42,17 @@ class FBPResolutionDialog(QDialog):
         layout.setSpacing(15)
 
         # 資訊標籤。
+        info_layout = QHBoxLayout()
         info_label = QLabel(f"<b>Original Image Size:</b> {original_size[0]}×{original_size[1]}")
         info_label.setStyleSheet("font-family: Calibri; font-size: 14pt; padding: 8px;")
-        layout.addWidget(info_label)
+        info_layout.addWidget(info_label)
+
+        self.inverse_checkbox = QCheckBox("Inverse")
+        self.inverse_checkbox.setStyleSheet("font-family: Calibri; font-size: 14pt; padding: 8px;")
+        info_layout.addWidget(self.inverse_checkbox)
+        info_layout.addStretch()  # 讓checkbox靠右
+
+        layout.addLayout(info_layout)
 
         # astra支援標籤。
         astra_status = "astra GPU acceleration available" if self.astra_available else "astra GPU acceleration not available"
@@ -67,7 +75,7 @@ class FBPResolutionDialog(QDialog):
         self.angle_spinbox.setValue(1)
         self.angle_spinbox.setSuffix(" degree(s)")
         self.angle_spinbox.setStyleSheet("font-family: Calibri; font-size: 14pt;")
-        self.angle_spinbox.valueChanged.connect(self.set_angle_interval)
+        # self.angle_spinbox.valueChanged.connect(self.set_angle_interval)
 
         angle_layout.addWidget(angle_label)
         angle_layout.addWidget(self.angle_spinbox)
@@ -128,26 +136,18 @@ class FBPResolutionDialog(QDialog):
         except ImportError:
             return False
         
-    def get_astra_available(self):
-        """取得astra套件可用狀態。"""
-        return self.astra_available
-    
     def set_size(self, size):
-        """設定選取的重建尺寸。"""
         self.selected_size = size
 
-    def set_angle_interval(self, value):
-        """設定角度間隔。"""
-        self.angle_interval = float(value)
-
-    def get_size(self):
-        """取得選取的重建尺寸。"""
-        return self.selected_size
-
-    def get_angle_interval(self):
-        """取得角度間隔。"""
-        return self.angle_interval
-
+    def get_settings(self):
+        """取得設定值。"""
+        return {
+            "astra_available": self.astra_available,
+            "target_size": self.selected_size,
+            "angle_interval": self.angle_spinbox.value(),
+            "inverse": self.inverse_checkbox.isChecked()
+        }
+    
 
 class FBPViewer(QDialog):
     def __init__(self, recon_images, parent=None):

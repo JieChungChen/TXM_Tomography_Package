@@ -253,10 +253,12 @@ class TXM_ToolBox(QMainWindow):
         if resolution_dialog.exec_() != QDialog.Accepted:
             return 
 
-        target_size = resolution_dialog.get_size()
-        angle_interval = resolution_dialog.get_angle_interval()
-        astra_available = resolution_dialog.get_astra_available()
-        self.worker = FBPWorker(img_array, self.context.images.angles, target_size, angle_interval, astra_available)
+        settings = resolution_dialog.get_settings()
+        target_size = settings["target_size"]
+        angle_interval = settings["angle_interval"]
+        astra_available = settings["astra_available"]
+        inverse = settings["inverse"]
+        self.worker = FBPWorker(img_array, self.context.images.angles, target_size, angle_interval, astra_available, inverse)
 
         # 顯示進度對話框。
         self.progress_dialog = QProgressDialog(
@@ -292,8 +294,9 @@ class TXM_ToolBox(QMainWindow):
         start_layer = settings["start_layer"]
         end_layer = settings["end_layer"]
         angle_interval = settings["angle_interval"]
+        inverse = settings["inverse"]
 
-        self.worker = MLEMWorker(img_array, iter_count, mask_ratio, start_layer, end_layer, angle_interval)
+        self.worker = MLEMWorker(img_array, iter_count, mask_ratio, start_layer, end_layer, angle_interval, inverse)
         # 顯示進度對話框
         self.progress_dialog = QProgressDialog(
             "Reconstructing...", None, 0, 100, self
