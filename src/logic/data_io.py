@@ -137,6 +137,8 @@ def load_tif_folder(folder):
     all_imgs = []
     for f in files:
         img_temp = Image.open(f)
+        if img_temp.mode in ("RGB", "RGBA"):
+            img_temp = img_temp.convert("L")
         all_imgs.append(img_temp) 
     all_imgs = np.array(all_imgs)
     return all_imgs
