@@ -125,3 +125,67 @@ def image_resize(img, size):
     img = Image.fromarray(img)
     img = img.resize((size, size), Image.LANCZOS)
     return np.array(img)
+
+
+def common_line_method(features, search_range=150, c_line='center', similarity_mode='gradient'):
+    '''
+    Align tomography vertical shift using common line method.
+
+    Parameters:
+    -----------
+    features: np.ndarray
+        Horizontal sum array of shape (N_projections, Height)
+        Note: This should be passed as (N, H), not (H, N).
+    search_range: int
+        vertical shift search range in pixels
+    c_line: str
+        'average' or 'center' - how to calculate reference common line
+    similarity_mode: str
+        'sum' or 'gradient' - use horizontal sum or its gradient for similarity
+
+    Returns:
+    --------
+    aligned_tomo: numpy array
+        vertically aligned tomography
+    shifts: numpy array
+        vertical shift for each projection
+    '''
+    n_proj, size = features.shape
+
+
+    # Apply gradient if needed
+    if similarity_mode == 'gradient':
+        features = np.gradient(features, axis=1)
+
+    # Calculate reference common line
+    if c_line == 'average':
+        c_line = features.mean(axis=0)
+    elif c_line == 'center':
+        c_line = features[n_proj//2]
+
+    # Grid search for best vertical shift
+    shifts = np.zeros(n_proj, dtype=int)
+
+    for i in range(n_proj):
+        best_shift = 0
+        best_score = -np.inf
+
+        # Search in range [-search_range, search_range]
+        for shift in range(-search_range, search_range + 1):
+            signal1 = np.roll(features[i], shift, axis=0)
+
+            # Normalize both signals
+            signal1 = signal1 - np.mean(signal1)
+            signal2 = c_line - np.mean(c_line)
+
+            # Compute correlation coefficient
+            correlation = np.sum(signal1 * signal2) / (np.sqrt(np.sum(signal1**2)) * np.sqrt(np.sum(signal2**2)))
+
+            # Update best shift if this is better
+            if correlation > best_score:
+                best_score = correlation
+                best_shift = shift
+
+        shifts[i] = best_shift
+
+    return shifts

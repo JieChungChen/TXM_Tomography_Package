@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (QLabel, QDialog, QPushButton, QVBoxLayout, QSizePol
                              QHBoxLayout, QSlider, QFileDialog)
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QImage, QPixmap, QFont, QPainter, QPen, QColor
+from src.gui.cc_align_dialog import CCAlignDialog 
 from src.logic.utils import norm_hs_to_8bit
 
 
@@ -117,6 +118,8 @@ class AlignViewer(QDialog):
         self.save_btn.setToolTip('Save current shifts to a text file')
         self.load_btn = QPushButton('Load shifts')
         self.load_btn.setToolTip('Load shifts from a text file')
+        self.hs_align_btn = QPushButton('HS Align') 
+        self.hs_align_btn.setToolTip('Open auto-alignment dialog (Cross-correlation)')
         self.done_btn = QPushButton('Finish')
         self.change_center_btn = QPushButton('Change center')
         self.change_center_btn.setToolTip('Next click: Change rotational center')
@@ -124,15 +127,15 @@ class AlignViewer(QDialog):
         self.reset_sino_btn = QPushButton('Reset sino')
         self.reset_sino_btn.setToolTip('Reset sinogram view')
 
-        for btn in [self.prev_btn, self.next_btn, self.save_btn, self.load_btn, 
-                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn,
-                    self.reset_sino_btn]:
+        for btn in [self.prev_btn, self.next_btn, self.save_btn, self.load_btn, self.hs_align_btn,
+                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn, self.reset_sino_btn]:
             btn.setFont(self.FONT_CTRL)
 
         self.prev_btn.clicked.connect(self.prev_image)
         self.next_btn.clicked.connect(self.next_image)
         self.save_btn.clicked.connect(self.save_shifts)
         self.load_btn.clicked.connect(self.load_shifts)
+        self.hs_align_btn.clicked.connect(self.open_auto_align_dialog)
         self.done_btn.clicked.connect(self.finish)
         self.change_center_btn.clicked.connect(self.start_change_center)
         self.zoom_tomo_btn.clicked.connect(self.toggle_zoom_tomo)
@@ -193,6 +196,7 @@ class AlignViewer(QDialog):
         hbox.addWidget(self.next_btn)
         hbox.addWidget(self.save_btn)
         hbox.addWidget(self.load_btn)
+        hbox.addWidget(self.hs_align_btn)
         hbox.addWidget(self.done_btn)
         layout.addLayout(hbox)
         layout.addWidget(self.slider)
@@ -283,6 +287,14 @@ class AlignViewer(QDialog):
                         continue
         self.update_all()
 
+    def open_auto_align_dialog(self):
+        features = self.hs_array.copy()
+        
+        dlg = CCAlignDialog(features, parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            calculated_shifts = dlg.get_shifts()
+            self._apply_cc_shifts(calculated_shifts)
+
     def finish(self):
         for i in range(self.n_proj):
             img = self.tomo.get_image(i)
@@ -296,6 +308,14 @@ class AlignViewer(QDialog):
         self.update_hori_sum()
 
     # -------------- core logic --------------- 
+    def _apply_cc_shifts(self, y_shifts):
+        for i, dy in enumerate(y_shifts):
+            self.shifts[i][0] += dy 
+            self.proj_images[i] = np.roll(self.proj_images[i], shift=dy, axis=0)
+            self.hs_array[:, i] = np.roll(self.hs_array[:, i], shift=dy)
+            
+        self.update_all()
+
     def _get_tomo_zoomed_vertex(self):
         center_x, center_y = self.rotational_center
         x0 = center_x - self.tomo_zoomed_size // 2
