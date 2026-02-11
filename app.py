@@ -49,6 +49,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_full_view.triggered.connect(self.mosaic_stitching)
 
         self.ui.actionAI_Reference.triggered.connect(self.ref_ai_remover)
+        self.ui.actionSino_Alignment.triggered.connect(self.sino_aligner)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -203,6 +204,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_ML_EM.setEnabled(self.context.mode == 'tomo')
         self.ui.action_full_view.setEnabled(self.context.mode == 'mosaic')
         self.ui.actionAI_Reference.setEnabled(self.context.ai_available)
+        self.ui.actionSino_Alignment.setEnabled(self.context.ai_available and self.context.mode == 'tomo')
 
         self.ui.imageSlider.setMinimum(0)
         self.ui.imageSlider.setMaximum(len(self.context.images) - 1)
@@ -334,6 +336,20 @@ class TXM_ToolBox(QMainWindow):
                 self.context.images.set_full_images(dialog.processed_images)
                 self.update_env()
                 self.show_info_message("AI Background Removal", f"Completed!")
+
+    @handle_errors(title="Sino Alignment Error")
+    def sino_aligner(self, *args):
+        """使用 Sinogram Alignment Model 處理斷層影像"""
+        if not self.context.ai_available:
+            QMessageBox.warning(self, "AI Not Available", "PyTorch is not installed.")
+            return
+        else:
+            from src.gui import SinoAlignerDialog
+            dialog = SinoAlignerDialog(self.context.images, self)
+            if dialog.exec_() == QDialog.Accepted:
+                self.context.images.set_full_images(dialog.aligned_images)
+                self.update_env()
+                self.show_info_message("Sino Alignment", f"Completed!")
 
     @handle_errors(title="Save Image Error")
     def save_image_as_tif(self, save_mode):

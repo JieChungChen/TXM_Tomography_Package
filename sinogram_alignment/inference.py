@@ -37,8 +37,8 @@ def apply_shift(sinogram, shifts):
 
 
 def inference_alignment(model_path='checkpoints/alignment_ep500.pt', 
-                        data_path='temp/sino_0138.tif'
-                        , sample_id=20, max_shift=50, n_iter=5, seed=2):
+                        data_path='temp/sino_0294.tif'
+                        , sample_id=20, max_shift=50, n_iter=5, seed=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with open('configs/alignment_self_att_v3.yml', 'r') as f:
         configs = yaml.safe_load(f)
@@ -71,7 +71,7 @@ def inference_alignment(model_path='checkpoints/alignment_ep500.pt',
         for i in range(len(raw_sino)):
             raw_sino[i, :] = np.roll(raw_sino[i, :], shift[i])
     else:
-        gt_sino = None
+        gt_sino = raw_sino.copy()
 
     
     model = sino_align_transformer_builder(configs['model_settings']).to(device)

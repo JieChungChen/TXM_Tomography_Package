@@ -269,18 +269,65 @@ class FBPViewer(QDialog):
             return
 
         try:
-            for i in range(self.n_slices):
-                filename = f"{self.sample_name}_{i+1:04d}.tif"
-                filepath = os.path.join(output_dir, filename)
+            # 取得 3D volume 的維度 (Z, Y, X)
+            z_dim, y_dim, x_dim = self.recon_images.shape
 
-                img_data = self.recon_images[i]
+            # 定義子資料夾路徑
+            paths = {
+                "XY": os.path.join(output_dir, "XY"),
+                "YZ": os.path.join(output_dir, "YZ"),
+                "XZ": os.path.join(output_dir, "XZ")
+            }
+
+            # 自動建立資料夾 (如果不存在的話)
+            for folder_path in paths.values():
+                os.makedirs(folder_path, exist_ok=True)
+
+            # 1. 儲存 XY 切面 (橫切面，原本的邏輯)
+            for i in range(z_dim):
+                filename = f"{self.sample_name}_{i+1:04d}_XY.tif"
+                filepath = os.path.join(paths["XY"], filename)
+
+                img_data = self.recon_images[i, :, :]
                 img_pil = Image.fromarray(img_data)
                 img_pil.save(filepath)
+            
+            QMessageBox.information(
+                self,
+                "Save Complete",
+                f"Successfully saved {z_dim} slices to:\n{paths['XY']}"
+            )
+
+            # 2. 儲存 YZ 切面 (矢狀面)
+            # 取第 i 個 X 座標的所有 Y, Z
+            for i in range(x_dim):
+                filename = f"{self.sample_name}_{i+1:04d}_YZ.tif"
+                filepath = os.path.join(paths["YZ"], filename)
+
+                # 切片 [:, :, i] 取得 YZ 平面
+                img_data = self.recon_images[:, :, i]
+                Image.fromarray(img_data).save(filepath)
 
             QMessageBox.information(
                 self,
                 "Save Complete",
-                f"Successfully saved {self.n_slices} slices to:\n{output_dir}"
+                f"Successfully saved {x_dim} slices to:\n{paths['YZ']}"
+            )
+
+            # 3. 儲存 XZ 切面 (冠狀面)
+            # 取第 i 個 Y 座標的所有 X, Z
+            for i in range(y_dim):
+                filename = f"{self.sample_name}_{i+1:04d}_XZ.tif"
+                filepath = os.path.join(paths["XZ"], filename)
+
+                # 切片 [:, i, :] 取得 XZ 平面
+                img_data = self.recon_images[:, i, :]
+                Image.fromarray(img_data).save(filepath)
+       
+            QMessageBox.information(
+                self,
+                "Save Complete",
+                f"Successfully saved {y_dim} slices to:\n{paths['XZ']}"
             )
 
         except Exception as e:
