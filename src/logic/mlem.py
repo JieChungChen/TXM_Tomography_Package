@@ -54,8 +54,8 @@ class MLEMWorker(QThread):
                 return
 
             # Extract the sinogram for the current layer
+            self.images = min_max_normalize(self.images, to_8bit=True)
             sinogram = self.images[:, layer, :]
-            sinogram = min_max_normalize(sinogram, to_8bit=True)
             sinogram = (255 - sinogram).astype(np.float64)
 
             # Execute ML-EM reconstruction

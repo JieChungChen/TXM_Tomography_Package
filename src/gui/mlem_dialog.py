@@ -47,7 +47,7 @@ class MLEMSettingsDialog(QDialog):
 
         self.inverse_checkbox = QCheckBox("Inverse")
         self.inverse_checkbox.setStyleSheet("font-family: Calibri; font-size: 14pt; padding: 8px;")
-        self.inverse_checkbox.setChecked(True) 
+        self.inverse_checkbox.setChecked(False) 
         info_layout.addWidget(self.inverse_checkbox)
         info_layout.addStretch() 
 

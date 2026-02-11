@@ -32,7 +32,7 @@ class CCAlignDialog(QDialog):
         
         # Data
         self.features = features
-        self.calculated_shifts = np.zeros(features.shape[0], dtype=int)
+        self.calculated_shifts = np.zeros(features.shape[1], dtype=int)
         
         # UI Elements
         self._init_ui()

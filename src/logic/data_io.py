@@ -25,6 +25,8 @@ def read_txm_raw(filename: str, mode: str):
 
     ole = olefile.OleFileIO(filename)
     n_img = len([entry for entry in ole.listdir() if entry[0] in ['ImageData1', 'ImageData2']])
+    if mode == 'mosaic':
+        n_img = None
     metadata = read_ole_metadata(ole, mode, n_img)
 
     if mode == 'tomo':
