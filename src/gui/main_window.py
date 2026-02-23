@@ -208,6 +208,13 @@ class Ui_TXM_ToolBox(object):
         font.setPointSize(14)
         self.actionSino_Alignment.setFont(font)
         self.actionSino_Alignment.setObjectName("actionSino_Alignment")
+        self.actionX_axis_shift = QtWidgets.QAction(TXM_ToolBox)
+        self.actionX_axis_shift.setEnabled(False)
+        font = QtGui.QFont()
+        font.setFamily("Calibri")
+        font.setPointSize(14)
+        self.actionX_axis_shift.setFont(font)
+        self.actionX_axis_shift.setObjectName("actionX_axis_shift")
         self.menuLoad_Tomo.addAction(self.action_tomo_txrm)
         self.menuLoad_Tomo.addAction(self.action_multi_txrm)
         self.menuLoad_Tomo.addAction(self.action_tomo_tifs)
@@ -222,6 +229,7 @@ class Ui_TXM_ToolBox(object):
         self.menuFile.addAction(self.menuSave.menuAction())
         self.menuEdit.addAction(self.action_reference)
         self.menuEdit.addAction(self.action_vertical_flip)
+        self.menuEdit.addAction(self.actionX_axis_shift)
         self.menuEdit.addAction(self.action_y_shift)
         self.menuEdit.addAction(self.action_adjust_contrast)
         self.menuTomography.addAction(self.action_alignment)
@@ -269,7 +277,8 @@ class Ui_TXM_ToolBox(object):
         self.action_single_xrm.setText(_translate("TXM_ToolBox", "Load single"))
         self.actionAI_Reference.setText(_translate("TXM_ToolBox", "AI Reference"))
         self.action_ML_EM.setText(_translate("TXM_ToolBox", "ML-EM"))
-        self.actionSino_Alignment.setText(_translate("TXM_ToolBox", "Sino Alignment"))
+        self.actionSino_Alignment.setText(_translate("TXM_ToolBox", "SIno Alignment"))
+        self.actionX_axis_shift.setText(_translate("TXM_ToolBox", "X-axis shift"))
 
 
 if __name__ == "__main__":

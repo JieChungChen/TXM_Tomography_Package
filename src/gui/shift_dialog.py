@@ -1,17 +1,19 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QDialogButtonBox, QPushButton
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QPushButton
 from PyQt5.QtCore import pyqtSignal
 
 
 class ShiftDialog(QDialog):
     apply_shift = pyqtSignal(int)
 
-    def __init__(self, image_height, parent=None):
+    def __init__(self, image_height, parent=None, axis='y'):
         """
         Args:
             image_height: 影像高度 (pixels)
+            axis: 'x' or 'y' axis for the shift
         """
         super().__init__(parent)
-        self.setWindowTitle("Y-axis Shift")
+        self.axis = axis
+        self.setWindowTitle(f"{axis.upper()}-axis Shift")
         self.setFixedSize(400, 300)
         self.shift_amount = 50  # 預設值
 
@@ -28,10 +30,16 @@ class ShiftDialog(QDialog):
         layout.setSpacing(15)
 
         # 資訊標籤。
-        info_label = QLabel(
-            "<b>Shift images vertically</b><br>"
-            f"Image height: {image_height} pixels"
-        )
+        if axis == 'y':
+            info_label = QLabel(
+                "<b>Shift images vertically</b><br>"
+                f"Image height: {image_height} pixels"
+            )
+        else:
+            info_label = QLabel(
+                "<b>Shift images horizontally</b><br>"
+                f"Image width: {image_height} pixels"
+            )
         info_label.setStyleSheet("font-family: Calibri; font-size: 14pt; padding: 10px;")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
@@ -58,10 +66,17 @@ class ShiftDialog(QDialog):
         layout.addLayout(shift_layout)
 
         # 說明文字。
-        desc_label = QLabel(
-            "<i>Positive values shift down, negative values shift up.<br>"
-            "The shift wraps around (np.roll behavior).</i>"
-        )
+        if axis == 'y':
+            desc_label = QLabel(
+                "<i>Positive values shift down, negative values shift up.<br>"
+                "The shift wraps around (np.roll behavior).</i>"
+            )
+        else:
+            desc_label = QLabel(
+                "<i>Positive values shift right, negative values shift left.<br>"
+                "The shift wraps around (np.roll behavior).</i>"
+            )
+
         desc_label.setStyleSheet("font-family: Calibri; font-size: 12pt; color: #555; padding: 5px;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
@@ -70,7 +85,6 @@ class ShiftDialog(QDialog):
         apply_button = QPushButton("Apply")
         apply_button.clicked.connect(lambda: self.apply_shift.emit(self.get_shift_amount()))
         layout.addWidget(apply_button)
-
 
     def set_shift_amount(self, value):
         self.shift_amount = value

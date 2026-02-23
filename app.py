@@ -41,6 +41,7 @@ class TXM_ToolBox(QMainWindow):
         
         self.ui.action_vertical_flip.triggered.connect(self.vertical_flip)
         self.ui.action_reference.triggered.connect(self.load_reference)
+        self.ui.actionX_axis_shift.triggered.connect(self.apply_x_shift)
         self.ui.action_y_shift.triggered.connect(self.apply_y_shift)
         self.ui.action_adjust_contrast.triggered.connect(self.open_contrast_dialog)
         self.ui.action_alignment.triggered.connect(self.open_align_viewer)
@@ -197,6 +198,7 @@ class TXM_ToolBox(QMainWindow):
         self.ui.action_save_raw.setEnabled(True)
         self.ui.action_save_norm.setEnabled(True)
         self.ui.action_vertical_flip.setEnabled(True)
+        self.ui.actionX_axis_shift.setEnabled(True)
         self.ui.action_y_shift.setEnabled(True)
         self.ui.action_adjust_contrast.setEnabled(True)
         self.ui.action_alignment.setEnabled(self.context.mode == 'tomo')
@@ -214,10 +216,20 @@ class TXM_ToolBox(QMainWindow):
         self.context.images.flip_vertical()
         self.update_image(self.current_id)
 
+    def apply_x_shift(self, *args):
+        h, w = self.context.get_image_size()
+
+        dialog = ShiftDialog(h, self, axis='x')
+        dialog.apply_shift.connect(lambda amount: (
+            self.context.images.apply_x_shift(amount),
+            self.update_image(self.current_id),
+        ) if amount != 0 else None) 
+        dialog.exec_()
+
     def apply_y_shift(self, *args):
         h, w = self.context.get_image_size()
 
-        dialog = ShiftDialog(h, self)
+        dialog = ShiftDialog(h, self, axis='y')
         dialog.apply_shift.connect(lambda amount: (
             self.context.images.apply_y_shift(amount),
             self.update_image(self.current_id),

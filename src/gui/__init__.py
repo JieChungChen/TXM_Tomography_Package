@@ -6,7 +6,7 @@ from src.gui.fbp_viewer import FBPResolutionDialog, FBPViewer
 from src.gui.mlem_dialog import MLEMSettingsDialog
 from src.gui.manual_alignment import AlignViewer
 from src.gui.mosaic_viewer import MosaicPreviewDialog
-from src.gui.yshift_dialog import ShiftDialog
+from src.gui.shift_dialog import ShiftDialog
 from src.gui.reference_dialog import ReferenceModeDialog, SplitSliderDialog
 
 

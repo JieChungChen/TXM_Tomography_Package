@@ -85,6 +85,17 @@ class TXM_Images:
     def flip_vertical(self):
         self.images = np.flip(self.images, axis=1)
 
+    def apply_x_shift(self, shift_value):
+        """
+        apply horizontal shift to all images.
+
+        Parameters
+        ----------
+        shift_value : int
+            The amount of horizontal shift. Positive values shift right, negative values shift left.
+        """
+        self.images = np.roll(self.images, shift_value, axis=2)
+
     def apply_y_shift(self, shift_value):
         """
         apply vertical shift to all images.
