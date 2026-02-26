@@ -132,7 +132,7 @@ def load_tif_folder(folder):
     np.ndarray
         3D numpy array of shape (N, H, W)
     """
-    files = glob.glob(f"{folder}/*tif")
+    files = sorted(glob.glob(f"{folder}/*tif"))
     if len(files) == 0:
         return
     
