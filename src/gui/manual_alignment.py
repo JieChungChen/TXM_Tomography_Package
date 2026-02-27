@@ -2,8 +2,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 from PyQt5.QtWidgets import (QLabel, QDialog, QPushButton, QVBoxLayout, QSizePolicy,
                              QHBoxLayout, QSlider, QFileDialog)
-from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtGui import QImage, QPixmap, QFont, QPainter, QPen, QColor
+from PyQt5.QtCore import Qt, QEvent, QSize
+from PyQt5.QtGui import QImage, QIcon, QPixmap, QFont, QPainter, QPen, QColor
 from src.gui.cc_align_dialog import CCAlignDialog 
 from src.logic.utils import norm_hs_to_8bit
 
@@ -50,6 +50,7 @@ class AlignViewer(QDialog):
         self.changing_center = False
         self.tomo_zoomed = False
         self.dragging_line = False
+        self.shift_mode = False
         
         # tomography variables
         self.shifts = [[0, 0] for _ in range(self.n_proj)] # list of [y_shift, x_shift]
@@ -98,17 +99,48 @@ class AlignViewer(QDialog):
         self.sino_label.setAlignment(Qt.AlignCenter)
         self.sino_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.sino_label.setStyleSheet(label_style)
+    
+    def _create_zoom_icon(self, is_zoom_in):
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        pen = QPen(QColor(50, 50, 50), 3)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        
+        # 繪製放大鏡圓圈
+        painter.drawEllipse(4, 4, 16, 16)
+        # 繪製放大鏡手柄
+        painter.drawLine(18, 18, 28, 28)
+        
+        # 繪製 + 或 -
+        pen.setWidth(2)
+        painter.setPen(pen)
+        if is_zoom_in:
+            painter.drawLine(8, 12, 16, 12)
+            painter.drawLine(12, 8, 12, 16)
+        else:
+            painter.drawLine(8, 12, 16, 12)
+            
+        painter.end()
+        return QIcon(pixmap)
 
     def _init_buttons(self):
         # zoom in / out bottons
-        self.zoom_in_btn = QPushButton('Zoom In')
-        self.zoom_in_btn.setFont(self.FONT_ZOOM)
-        self.zoom_in_btn.setFixedSize(100, 40)
+        self.zoom_in_btn = QPushButton()
+        self.zoom_in_btn.setIcon(self._create_zoom_icon(True))
+        self.zoom_in_btn.setIconSize(QSize(24, 24))
+        self.zoom_in_btn.setFixedSize(40, 40)
+        self.zoom_in_btn.setToolTip('Zoom In')
         self.zoom_in_btn.clicked.connect(self.zoom_in)
 
-        self.zoom_out_btn = QPushButton('Zoom Out')
-        self.zoom_out_btn.setFont(self.FONT_ZOOM)
-        self.zoom_out_btn.setFixedSize(100, 40)
+        self.zoom_out_btn = QPushButton()
+        self.zoom_out_btn.setIcon(self._create_zoom_icon(False))
+        self.zoom_out_btn.setIconSize(QSize(24, 24))
+        self.zoom_out_btn.setFixedSize(40, 40)
+        self.zoom_out_btn.setToolTip('Zoom Out')
         self.zoom_out_btn.clicked.connect(self.zoom_out)
 
         # control buttons
@@ -121,14 +153,18 @@ class AlignViewer(QDialog):
         self.hs_align_btn = QPushButton('HS Align') 
         self.hs_align_btn.setToolTip('Open auto-alignment dialog (Cross-correlation)')
         self.done_btn = QPushButton('Finish')
+        
         self.change_center_btn = QPushButton('Change center')
         self.change_center_btn.setToolTip('Next click: Change rotational center')
         self.zoom_tomo_btn = QPushButton('Zoom tomo')
+        self.x_shift_btn = QPushButton('X shift')
+        self.x_shift_btn.setCheckable(True)
+        self.x_shift_btn.setToolTip('Use A/D keys to apply X shift to all projections')
         self.reset_sino_btn = QPushButton('Reset sino')
         self.reset_sino_btn.setToolTip('Reset sinogram view')
 
         for btn in [self.prev_btn, self.next_btn, self.save_btn, self.load_btn, self.hs_align_btn,
-                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn, self.reset_sino_btn]:
+                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn, self.x_shift_btn, self.reset_sino_btn]:
             btn.setFont(self.FONT_CTRL)
 
         self.prev_btn.clicked.connect(self.prev_image)
@@ -139,6 +175,7 @@ class AlignViewer(QDialog):
         self.done_btn.clicked.connect(self.finish)
         self.change_center_btn.clicked.connect(self.start_change_center)
         self.zoom_tomo_btn.clicked.connect(self.toggle_zoom_tomo)
+        self.x_shift_btn.clicked.connect(self.apply_x_shift)
         self.reset_sino_btn.clicked.connect(self.reset_sino_view)
 
     def _init_slider(self):
@@ -154,6 +191,7 @@ class AlignViewer(QDialog):
         zoom_hbox = QHBoxLayout()
         zoom_hbox.addWidget(self.change_center_btn)
         zoom_hbox.addWidget(self.zoom_tomo_btn)
+        zoom_hbox.addWidget(self.x_shift_btn)
         zoom_hbox.addStretch(1)
         zoom_hbox.addWidget(self.reset_sino_btn)
         zoom_hbox.addWidget(self.zoom_in_btn)
@@ -308,6 +346,9 @@ class AlignViewer(QDialog):
         self.update_hori_sum()
 
     # -------------- core logic --------------- 
+    def apply_x_shift(self):
+        self.shift_mode = self.x_shift_btn.isChecked()
+    
     def _apply_cc_shifts(self, y_shifts):
         for i, dy in enumerate(y_shifts):
             self.shifts[i][0] += dy 
@@ -395,11 +436,17 @@ class AlignViewer(QDialog):
         key = event.key()
         if key in key_map:
             axis, delta = key_map[key]
-            self.shifts[self.index][axis] += delta
-            img_temp = self.proj_images[self.index]
-            self.proj_images[self.index] = np.roll(img_temp, shift=delta, axis=axis)
-            if axis == 0:
-                self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=delta)
+            
+            if self.shift_mode and axis == 1:
+                for i in range(self.n_proj):
+                    self.shifts[i][1] += delta
+                self.proj_images = np.roll(self.proj_images, shift=delta, axis=2)
+            else:
+                self.shifts[self.index][axis] += delta
+                img_temp = self.proj_images[self.index]
+                self.proj_images[self.index] = np.roll(img_temp, shift=delta, axis=axis)
+                if axis == 0:
+                    self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=delta)
             self.update_all()
 
     def eventFilter(self, obj, event):
