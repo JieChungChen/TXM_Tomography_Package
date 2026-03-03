@@ -17,7 +17,7 @@ class FBPResolutionDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("FBP Reconstruction Settings")
-        self.setFixedSize(450, 500)
+        self.setFixedSize(450, 650)
 
         # 統一 Dialog 外觀
         self.setStyleSheet("""
@@ -83,6 +83,44 @@ class FBPResolutionDialog(QDialog):
         angle_group.setLayout(angle_layout)
         layout.addWidget(angle_group)
 
+        # 旋轉中心校正群組（可選）。
+        self.correction_group = QGroupBox("Center Correction (optional)")
+        self.correction_group.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: bold;")
+        self.correction_group.setCheckable(True)
+        self.correction_group.setChecked(False)
+        correction_layout = QVBoxLayout()
+        correction_layout.setSpacing(8)
+
+        range_layout = QHBoxLayout()
+        range_label = QLabel("Search Range (\u00b1):")
+        range_label.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: normal;")
+        self.correction_range_spinbox = QSpinBox()
+        self.correction_range_spinbox.setMinimum(1)
+        self.correction_range_spinbox.setMaximum(500)
+        self.correction_range_spinbox.setValue(20)
+        self.correction_range_spinbox.setSuffix(" pixels")
+        self.correction_range_spinbox.setStyleSheet("font-family: Calibri; font-size: 14pt;")
+        range_layout.addWidget(range_label)
+        range_layout.addWidget(self.correction_range_spinbox)
+        range_layout.addStretch()
+
+        layer_layout = QHBoxLayout()
+        layer_label = QLabel("Target Layer:")
+        layer_label.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: normal;")
+        self.correction_layer_spinbox = QSpinBox()
+        self.correction_layer_spinbox.setMinimum(0)
+        self.correction_layer_spinbox.setMaximum(original_size[0] - 1)
+        self.correction_layer_spinbox.setValue(original_size[0] // 2)
+        self.correction_layer_spinbox.setStyleSheet("font-family: Calibri; font-size: 14pt;")
+        layer_layout.addWidget(layer_label)
+        layer_layout.addWidget(self.correction_layer_spinbox)
+        layer_layout.addStretch()
+
+        correction_layout.addLayout(range_layout)
+        correction_layout.addLayout(layer_layout)
+        self.correction_group.setLayout(correction_layout)
+        layout.addWidget(self.correction_group)
+
         # 解析度選擇群組。
         group_box = QGroupBox("Select Reconstruction Resolution")
         group_box.setStyleSheet("font-family: Calibri; font-size: 14pt; font-weight: bold;")
@@ -145,9 +183,169 @@ class FBPResolutionDialog(QDialog):
             "astra_available": self.astra_available,
             "target_size": self.selected_size,
             "angle_interval": self.angle_spinbox.value(),
-            "inverse": self.inverse_checkbox.isChecked()
+            "inverse": self.inverse_checkbox.isChecked(),
+            "center_shift": 0,
+            "center_correction_enabled": self.correction_group.isChecked(),
+            "correction_range": self.correction_range_spinbox.value(),
+            "correction_layer": self.correction_layer_spinbox.value()
         }
     
+
+class CenterCorrectionPreviewDialog(QDialog):
+    """Center Correction 預覽對話框：預先計算所有 shift 值的重建結果，讓使用者以滑桿瀏覽並選定最佳值。"""
+
+    def __init__(self, images, angles, target_size, correction_layer, correction_range,
+                 angle_interval, astra_available, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Center Correction Preview")
+        self.setFixedSize(650, 720)
+        self.setStyleSheet("""
+            QDialog {
+                border: 1px solid #e2e2e2;
+                border-radius: 12px;
+                background: #fafbfc;
+            }
+        """)
+        font = QFont("Calibri", 11)
+        self.setFont(font)
+
+        import numpy as np
+
+        # Resize images to target_size（與 FBPWorker 相同邏輯）。
+        resized = []
+        for img in images:
+            pil = Image.fromarray(img)
+            pil = pil.resize((target_size, target_size), Image.Resampling.LANCZOS)
+            resized.append(np.array(pil))
+        resized = np.array(resized)  # (N, target_size, target_size)
+
+        n, h, w = resized.shape
+        orig_h = images.shape[1]
+        scaled_layer = int(correction_layer * target_size / orig_h)
+        scaled_layer = max(0, min(scaled_layer, h - 1))
+
+        # 建立角度陣列（與 FBPWorker 相同邏輯）。
+        n_images = len(images)
+        if angles is None or len(angles) == 0:
+            ang = np.arange(n_images) * angle_interval - 90.0
+        else:
+            ang = np.arange(n_images) * angle_interval + angles[0]
+
+        # 預先計算所有 shift 值的重建結果。
+        self.shifts = list(range(-correction_range, correction_range + 1))
+        base_sino = resized[:, scaled_layer, :]
+        self.recon_images = []
+
+        _astra = astra_available
+        if _astra:
+            try:
+                from recon_algorithms import recon_fbp_astra
+                for shift in self.shifts:
+                    sino = np.roll(base_sino, shift, axis=1)
+                    r = recon_fbp_astra(sino, angle_interval=angle_interval, norm=False).astype(np.float32)
+                    r -= r.min()
+                    if r.max() > 0:
+                        r /= r.max()
+                    self.recon_images.append((r * 255).astype(np.uint8))
+            except ImportError:
+                _astra = False
+
+        if not _astra:
+            from src.logic.fbp import filter_back_projection_fast, prepare_fbp_geometry, get_hann_filter
+            img_size_padded = max(64, 2 ** int(np.ceil(np.log2(2 * w))))
+            hann = get_hann_filter(img_size_padded)
+            center, x, y, cos_vals, sin_vals = prepare_fbp_geometry(w, ang)
+            empty_sino = np.ones((n, w), dtype=np.float32)
+            recon_0 = filter_back_projection_fast(empty_sino, cos_vals, sin_vals, center, x, y, hann)
+            for shift in self.shifts:
+                sino = np.roll(base_sino, shift, axis=1)
+                r = filter_back_projection_fast(sino, cos_vals, sin_vals, center, x, y, hann, filtered=True, circle=False)
+                r = r / recon_0
+                r -= r.min()
+                if r.max() > 0:
+                    r /= r.max()
+                self.recon_images.append((r * 255).astype(np.uint8))
+
+        self.selected_shift = 0
+
+        # ---- UI ----
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # 影像顯示區域。
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image_label.setStyleSheet("background: #222; border-radius: 6px;")
+        layout.addWidget(self.image_label, stretch=1)
+
+        # Shift 數值標籤。
+        self.shift_label = QLabel()
+        self.shift_label.setAlignment(Qt.AlignCenter)
+        self.shift_label.setStyleSheet("font-family: Calibri; font-size: 13pt; color: #333; padding: 4px;")
+        layout.addWidget(self.shift_label)
+
+        # 滑桿。
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #bfbfbf;
+                height: 6px;
+                border-radius: 3px;
+                background: #dedede;
+            }
+            QSlider::handle:horizontal {
+                background: #1f6feb;
+                border: none;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+        """)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(len(self.shifts) - 1)
+        self.slider.setValue(correction_range)  # 預設指向 shift=0
+        self.slider.valueChanged.connect(self.update_preview)
+        layout.addWidget(self.slider)
+
+        # 說明文字。
+        hint_label = QLabel("<i>Drag the slider to browse different center shifts. Click OK to apply the selected shift for full 3D reconstruction.</i>")
+        hint_label.setWordWrap(True)
+        hint_label.setStyleSheet("font-family: Calibri; font-size: 11pt; color: #888; padding: 4px;")
+        layout.addWidget(hint_label)
+
+        # 按鈕。
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.update_preview(correction_range)
+
+    def update_preview(self, index):
+        """更新預覽影像與 shift 資訊。"""
+        self.selected_shift = self.shifts[index]
+        img = self.recon_images[index]
+        h, w = img.shape
+        qimg = QImage(img.data, w, h, w, QImage.Format_Grayscale8)
+        pixmap = QPixmap.fromImage(qimg)
+        label_w = self.image_label.width()
+        label_h = self.image_label.height()
+        if label_w > 0 and label_h > 0:
+            scaled = pixmap.scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.image_label.setPixmap(scaled)
+        else:
+            self.image_label.setPixmap(pixmap)
+        sign = "+" if self.selected_shift > 0 else ""
+        self.shift_label.setText(
+            f"Center Shift: <b>{sign}{self.selected_shift}</b> pixels"
+            f"  |  Index: {index + 1} / {len(self.shifts)}"
+        )
+
+    def get_selected_shift(self):
+        """回傳使用者選定的 shift 值。"""
+        return self.selected_shift
+
 
 class FBPViewer(QDialog):
     def __init__(self, recon_images, parent=None):

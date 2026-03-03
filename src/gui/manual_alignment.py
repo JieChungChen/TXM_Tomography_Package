@@ -50,7 +50,6 @@ class AlignViewer(QDialog):
         self.changing_center = False
         self.tomo_zoomed = False
         self.dragging_line = False
-        self.shift_mode = False
         
         # tomography variables
         self.shifts = [[0, 0] for _ in range(self.n_proj)] # list of [y_shift, x_shift]
@@ -157,14 +156,11 @@ class AlignViewer(QDialog):
         self.change_center_btn = QPushButton('Change center')
         self.change_center_btn.setToolTip('Next click: Change rotational center')
         self.zoom_tomo_btn = QPushButton('Zoom tomo')
-        self.x_shift_btn = QPushButton('X shift')
-        self.x_shift_btn.setCheckable(True)
-        self.x_shift_btn.setToolTip('Use A/D keys to apply X shift to all projections')
         self.reset_sino_btn = QPushButton('Reset sino')
         self.reset_sino_btn.setToolTip('Reset sinogram view')
 
         for btn in [self.prev_btn, self.next_btn, self.save_btn, self.load_btn, self.hs_align_btn,
-                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn, self.x_shift_btn, self.reset_sino_btn]:
+                    self.done_btn, self.change_center_btn, self.zoom_tomo_btn, self.reset_sino_btn]:
             btn.setFont(self.FONT_CTRL)
 
         self.prev_btn.clicked.connect(self.prev_image)
@@ -175,7 +171,6 @@ class AlignViewer(QDialog):
         self.done_btn.clicked.connect(self.finish)
         self.change_center_btn.clicked.connect(self.start_change_center)
         self.zoom_tomo_btn.clicked.connect(self.toggle_zoom_tomo)
-        self.x_shift_btn.clicked.connect(self.apply_x_shift)
         self.reset_sino_btn.clicked.connect(self.reset_sino_view)
 
     def _init_slider(self):
@@ -191,7 +186,6 @@ class AlignViewer(QDialog):
         zoom_hbox = QHBoxLayout()
         zoom_hbox.addWidget(self.change_center_btn)
         zoom_hbox.addWidget(self.zoom_tomo_btn)
-        zoom_hbox.addWidget(self.x_shift_btn)
         zoom_hbox.addStretch(1)
         zoom_hbox.addWidget(self.reset_sino_btn)
         zoom_hbox.addWidget(self.zoom_in_btn)
@@ -346,9 +340,6 @@ class AlignViewer(QDialog):
         self.update_hori_sum()
 
     # -------------- core logic --------------- 
-    def apply_x_shift(self):
-        self.shift_mode = self.x_shift_btn.isChecked()
-    
     def _apply_cc_shifts(self, y_shifts):
         for i, dy in enumerate(y_shifts):
             self.shifts[i][0] += dy 
@@ -436,17 +427,11 @@ class AlignViewer(QDialog):
         key = event.key()
         if key in key_map:
             axis, delta = key_map[key]
-            
-            if self.shift_mode and axis == 1:
-                for i in range(self.n_proj):
-                    self.shifts[i][1] += delta
-                self.proj_images = np.roll(self.proj_images, shift=delta, axis=2)
-            else:
-                self.shifts[self.index][axis] += delta
-                img_temp = self.proj_images[self.index]
-                self.proj_images[self.index] = np.roll(img_temp, shift=delta, axis=axis)
-                if axis == 0:
-                    self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=delta)
+            self.shifts[self.index][axis] += delta
+            img_temp = self.proj_images[self.index]
+            self.proj_images[self.index] = np.roll(img_temp, shift=delta, axis=axis)
+            if axis == 0:
+                self.hs_array[:, self.index] = np.roll(self.hs_array[:, self.index], shift=delta)
             self.update_all()
 
     def eventFilter(self, obj, event):

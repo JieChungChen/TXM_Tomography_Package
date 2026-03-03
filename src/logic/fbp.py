@@ -7,7 +7,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 class FBPWorker(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(np.ndarray)
-    def __init__(self, images, angles, target_size, angle_interval=1.0, astra_available=False, inverse=True):
+    def __init__(self, images, angles, target_size, angle_interval=1.0, astra_available=False, inverse=True, center_shift=0):
         """
         FBP worker thread for reconstruction.
         
@@ -19,12 +19,14 @@ class FBPWorker(QThread):
         angle_interval: angle interval (degrees, default 1.0)
         astra_available: whether ASTRA GPU acceleration is available (bool)
         inverse: whether to perform inverse FBP (bool, default True)
+        center_shift: horizontal shift for sinogram (int, default 0)
         """
         super().__init__()
         self.is_cancelled = False
         self.inverse = inverse
         self.angle_interval = angle_interval
         self.astra_available = astra_available
+        self.center_shift = center_shift
 
         if self.astra_available:
             try:
@@ -67,6 +69,9 @@ class FBPWorker(QThread):
                     break 
 
                 sino = self.images[:, i, :]
+                if self.center_shift != 0:
+                    sino = np.roll(sino, self.center_shift, axis=1)
+
                 temp = self.recon_fbp_astra(sino, angle_interval=self.angle_interval, norm=False) 
                 recon[i] = temp
             
@@ -95,6 +100,9 @@ class FBPWorker(QThread):
                     break 
 
                 sino = self.images[:, i, :]
+                if self.center_shift != 0:
+                    sino = np.roll(sino, self.center_shift, axis=1)
+
                 temp = filter_back_projection_fast(sino, cos_vals, sin_vals, center, x, y, hann, filtered=True, circle=False)
                 
                 temp /= recon_0

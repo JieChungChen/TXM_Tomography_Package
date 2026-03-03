@@ -11,7 +11,7 @@ except ImportError:
 
 from src.gui.contrast_dialog import ContrastDialog
 from src.gui.duplicates_selector import resolve_duplicates
-from src.gui.fbp_viewer import FBPResolutionDialog, FBPViewer
+from src.gui.fbp_viewer import FBPResolutionDialog, FBPViewer, CenterCorrectionPreviewDialog
 from src.gui.mlem_dialog import MLEMSettingsDialog
 from src.gui.manual_alignment import AlignViewer
 from src.gui.mosaic_viewer import MosaicPreviewDialog
@@ -23,7 +23,8 @@ __all__ = [
     "ContrastDialog", 
     "resolve_duplicates", 
     "FBPResolutionDialog", 
-    "FBPViewer", 
+    "FBPViewer",
+    "CenterCorrectionPreviewDialog",
     "AlignViewer", 
     "MLEMSettingsDialog",
     "MosaicPreviewDialog", 

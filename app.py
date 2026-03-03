@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QProgressDialog, QApplication, QMainWindow, QFileDia
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
 from src.gui import (AlignViewer, ContrastDialog, FBPViewer, MLEMSettingsDialog,
-                     FBPResolutionDialog, MosaicPreviewDialog, ShiftDialog, 
+                     FBPResolutionDialog, CenterCorrectionPreviewDialog, MosaicPreviewDialog, ShiftDialog, 
                      ReferenceModeDialog, SplitSliderDialog, resolve_duplicates)
 from src.gui.main_window import Ui_TXM_ToolBox
 from src.logic import (AppContext, TXM_Images, FBPWorker, MLEMWorker, data_io, 
@@ -272,7 +272,25 @@ class TXM_ToolBox(QMainWindow):
         angle_interval = settings["angle_interval"]
         astra_available = settings["astra_available"]
         inverse = settings["inverse"]
-        self.worker = FBPWorker(img_array, self.context.images.angles, target_size, angle_interval, astra_available, inverse)
+        center_shift = settings["center_shift"]  # default 0
+
+        # 若啟用 Center Correction，先開啟預覽視窗讓使用者選定最佳 shift。
+        if settings["center_correction_enabled"]:
+            preview_dialog = CenterCorrectionPreviewDialog(
+                img_array,
+                self.context.images.angles,
+                target_size,
+                settings["correction_layer"],
+                settings["correction_range"],
+                angle_interval,
+                astra_available,
+                self
+            )
+            if preview_dialog.exec_() != QDialog.Accepted:
+                return
+            center_shift = preview_dialog.get_selected_shift()
+
+        self.worker = FBPWorker(img_array, self.context.images.angles, target_size, angle_interval, astra_available, inverse, center_shift)
 
         # 顯示進度對話框。
         self.progress_dialog = QProgressDialog(
